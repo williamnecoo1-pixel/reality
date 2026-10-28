@@ -15,20 +15,19 @@ const SOURCES = env('SOURCES', [
   'https://github.com/0xRadikal/Free-v2ray-Configs/raw/refs/heads/main/all/configs.txt',
   'https://github.com/YawStar/Proxy-Hunter/raw/refs/heads/main/configs/proxy_configs.txt',
   'https://raw.githubusercontent.com/Delta-Kronecker/V2ray-Config/refs/heads/main/config/tcp-pass/batch_013.txt',
-    'https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/011.txt',
-    'https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/data/githubmirror/clean/trojan.txt',
-    'https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/008.txt',
-    'https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/normal/10ium-telegram-configs-collector-trojan',
-    'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/tls.txt',
-    'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/all.txt',
-    'https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/009.txt',
-    'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/best.txt',
-    'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/lite.txt',
-    'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/medium.txt',
-    'https://raw.githubusercontent.com/Delta-Kronecker/V2ray-Config/main/config/tcp-pass/batch_015.txt',
-    'https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/002.txt',
+  'https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/011.txt',
+  'https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/data/githubmirror/clean/trojan.txt',
+  'https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/008.txt',
+  'https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/normal/10ium-telegram-configs-collector-trojan',
+  'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/tls.txt',
+  'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/all.txt',
+  'https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/009.txt',
+  'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/best.txt',
+  'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/lite.txt',
+  'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/medium.txt',
+  'https://raw.githubusercontent.com/Delta-Kronecker/V2ray-Config/main/config/tcp-pass/batch_015.txt',
+  'https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/002.txt',
   'https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/Eternity'
-  
 ].join(','));
 
 const CF_IPS = env('CF_IPS', '104.18.37.127,x.com,www.getlucky.com,104.18.36.146,172.64.150.129,172.64.151.110,canary-proxsee-cf.pscp.tv,game01.circus.nl,104.18.41.245,185.199.108.153,api.server.io,104.16.132.229');
@@ -40,7 +39,16 @@ function parseSS(line) {
   
   const parts = raw.split('#');
   const cleanLink = parts[0];
-  const remark = parts[1] ? decodeURIComponent(parts[1]) : '';
+  
+  // 🟢 التصحيح 1: حماية decodeURIComponent باش ما يطيحش السكريبت
+  let remark = '';
+  if (parts[1]) {
+    try {
+      remark = decodeURIComponent(parts[1]);
+    } catch (e) {
+      remark = parts[1]; 
+    }
+  }
 
   const body = cleanLink.slice(5);
   
@@ -56,7 +64,12 @@ function parseSS(line) {
   const hostPort = rest.slice(0, qIdx);
   const query = rest.slice(qIdx + 1);
 
-  const [host, portStr] = hostPort.split(':');
+  // 🟢 التصحيح 2: استعمال lastIndexOf باش ما يطيحش مع IPv6
+  const colonIdx = hostPort.lastIndexOf(':');
+  if (colonIdx === -1) return null;
+  
+  const host = hostPort.slice(0, colonIdx);
+  const portStr = hostPort.slice(colonIdx + 1);
   const port = parseInt(portStr, 10);
   
   if (port !== 443) return null; 
@@ -140,12 +153,8 @@ async function main() {
   
   // فحص الـ TCP ضد الـ IP ديال Cloudflare
   const live = (await pool(list, CONC, async e => {
-    // كنختارو IP ديال CF بشكل عشوائي
     const cfIp = CF_IPS[Math.floor(Math.random() * CF_IPS.length)];
-    
-    // كنفحصو واش الـ CF IP مفتوح
     const ok = await tcpAlive(cfIp, e.port);
-    
     if (++n % 200 === 0) console.log(`    فحص ${n}/${list.length}`);
     return ok ? { ...e, cfIp } : null;
   })).filter(Boolean).slice(0, MAX_OUT);
