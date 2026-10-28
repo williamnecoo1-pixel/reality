@@ -1,0 +1,44 @@
+name: Build CF-Only Subscription
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'   # كل 6 سوايع
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-cf
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build
+        env:
+          CF_IPS: '104.18.37.127,172.64.80.1,104.16.0.1'
+        run: node scripts/build.mjs
+
+      - name: Commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add dist
+          git diff --staged --quiet || git commit -m "chore: refresh cf configs $(date -u +%FT%TZ)"
+          git push
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cf-subscription
+          path: dist/
