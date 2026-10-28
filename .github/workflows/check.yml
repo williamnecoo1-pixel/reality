@@ -2,9 +2,8 @@ name: Check and Update Working SS Configs
 
 on:
   workflow_dispatch:
-
   schedule:
-    # كل 6 سوايع - UTC
+    # Every 6 hours (UTC)
     - cron: "0 */6 * * *"
 
 permissions:
@@ -16,7 +15,6 @@ jobs:
     timeout-minutes: 500
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -33,20 +31,16 @@ jobs:
       - name: Download Xray
         run: |
           XRAY_VERSION="v26.7.28"
-
-          wget -q \
-            "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip" \
-            -O xray.zip
-
+          wget -q "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip" -O xray.zip
           unzip -q xray.zip -d xray
           chmod +x xray/xray
           ./xray/xray version
 
       - name: Check configs
-        run: |
-          python checker.py
+        run: python checker.py
 
-      - name: Prepare working_configs.txt
+      - name: Prepare subscription file
+        if: always()
         run: |
           if [ -f working.txt ]; then
             mv working.txt working_configs.txt
@@ -55,6 +49,7 @@ jobs:
           fi
 
       - name: Show result
+        if: always()
         run: |
           echo "=============================="
           echo " WORKING SS CONFIGS"
@@ -66,12 +61,11 @@ jobs:
           head -n 10 working_configs.txt
 
       - name: Update repository
+        if: success()
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add working_configs.txt
-
           if git diff --cached --quiet; then
             echo "No changes in working_configs.txt"
           else
@@ -80,6 +74,7 @@ jobs:
           fi
 
       - name: Upload working configs
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: working-configs
