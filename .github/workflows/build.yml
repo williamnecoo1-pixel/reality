@@ -2,7 +2,7 @@ name: Build CF-Only Subscription
 
 on:
   schedule:
-    - cron: '0 */6 * * *'   # كل 6 سوايع
+    - cron: '0 */6 * * *'
   workflow_dispatch:
   push:
     branches: [main]
@@ -17,28 +17,53 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
+    timeout-minutes: 40
 
-      - uses: actions/setup-node@v4
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+
+      - name: Install Shadowsocks client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shadowsocks-libev curl
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install v2ray-plugin
+        run: |
+          go install github.com/shadowsocks/v2ray-plugin@latest
+          v2ray-plugin -version || true
+          ss-local -h || true
+
       - name: Build SS-WS Configs
-        env:
-          CF_IPS: '104.18.37.127,172.64.80.1,104.16.0.1'
         run: node scripts/build.mjs
 
-      - name: Commit
+      - name: Commit generated subscriptions
         run: |
-          git config user.name  "github-actions[bot]"
+          git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add dist
-          git diff --staged --quiet || git commit -m "chore: refresh cf configs $(date -u +%FT%TZ)"
-          git push origin main --force
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: refresh configs $(date -u +%FT%TZ)"
+            git push origin main
+          else
+            echo "No changes to commit"
+          fi
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload generated files
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: cf-subscription
           path: dist/
+          if-no-files-found: warn
