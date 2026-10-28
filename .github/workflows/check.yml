@@ -2,7 +2,9 @@ name: Check and Update Working SS Configs
 
 on:
   workflow_dispatch:
+
   schedule:
+    # كل 6 سوايع - UTC
     - cron: "0 */6 * * *"
 
 permissions:
@@ -11,14 +13,15 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 500
 
     steps:
+
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -29,9 +32,12 @@ jobs:
 
       - name: Download Xray
         run: |
-          # صلحنا النسخة لـ v1.8.24 حيت هي المستقرة
-          XRAY_VERSION="v1.8.24"
-          wget -q "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip" -O xray.zip
+          XRAY_VERSION="v26.7.28"
+
+          wget -q \
+            "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip" \
+            -O xray.zip
+
           unzip -q xray.zip -d xray
           chmod +x xray/xray
           ./xray/xray version
@@ -53,14 +59,19 @@ jobs:
           echo "=============================="
           echo " WORKING SS CONFIGS"
           echo "=============================="
+          echo "Count:"
           wc -l working_configs.txt
+          echo
+          echo "First configs:"
           head -n 10 working_configs.txt
 
       - name: Update repository
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
           git add working_configs.txt
+
           if git diff --cached --quiet; then
             echo "No changes in working_configs.txt"
           else
@@ -69,7 +80,7 @@ jobs:
           fi
 
       - name: Upload working configs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: working-configs
           path: working_configs.txt
