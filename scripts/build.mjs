@@ -8,10 +8,30 @@ const env = (k, d) => (process.env[k] || d).split(',').map(s => s.trim()).filter
 const SOURCES = env('SOURCES', [
   'https://github.com/0xRadikal/Free-v2ray-Configs/raw/refs/heads/main/all/configs.txt',
   'https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt',
+  'https://raw.githubusercontent.com/MustafaBaqer/VestraNet-Nodes/refs/heads/main/subscriptions/mix-normal.txt',
+  'https://github.com/barry-far/V2ray-Config/raw/refs/heads/main/All_Configs_Sub.txt',
+  'https://raw.githubusercontent.com/ByeWhiteLists/ByeWhiteLists2/refs/heads/main/ByeWhiteLists2.txt',
+  'https://github.com/0xRadikal/Free-v2ray-Configs/raw/refs/heads/main/top100.txt',
+  'https://github.com/0xRadikal/Free-v2ray-Configs/raw/refs/heads/main/all/configs.txt',
+  'https://github.com/YawStar/Proxy-Hunter/raw/refs/heads/main/configs/proxy_configs.txt',
+  'https://raw.githubusercontent.com/Delta-Kronecker/V2ray-Config/refs/heads/main/config/tcp-pass/batch_013.txt',
+    'https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/011.txt',
+    'https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/data/githubmirror/clean/trojan.txt',
+    'https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/008.txt',
+    'https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/normal/10ium-telegram-configs-collector-trojan',
+    'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/tls.txt',
+    'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/all.txt',
+    'https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/009.txt',
+    'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/best.txt',
+    'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/lite.txt',
+    'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/medium.txt',
+    'https://raw.githubusercontent.com/Delta-Kronecker/V2ray-Config/main/config/tcp-pass/batch_015.txt',
+    'https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/002.txt',
   'https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/Eternity'
+  
 ].join(','));
 
-const CF_IPS = env('CF_IPS', '104.18.37.127,172.64.80.1,104.16.0.1');
+const CF_IPS = env('CF_IPS', '104.18.37.127,x.com,www.getlucky.com,104.18.36.146,172.64.150.129,172.64.151.110,canary-proxsee-cf.pscp.tv,game01.circus.nl,104.18.41.245,185.199.108.153,api.server.io,104.16.132.229');
 const OUT = 'dist', MAX_OUT = 250, CONC = 40, T = 4000;
 
 function parseSS(line) {
