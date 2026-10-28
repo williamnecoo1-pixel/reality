@@ -310,7 +310,7 @@ SOURCE_URLS = [
 ]
 XRAY = "./xray/xray"
 
-# ← Cloudflare IP used for BOTH testing AND output
+# Cloudflare IP used for BOTH testing AND output
 CLOUDFLARE_IP = "104.18.37.127"
 
 TEST_URLS = [
@@ -319,7 +319,7 @@ TEST_URLS = [
     "http://www.gstatic.com/generate_204",
 ]
 
-TIMEOUT = 8                # ← lowered from 10 (Cloudflare configs are fast)
+TIMEOUT = 8
 MAX_WORKERS = 40
 BASE_PORT = 20000
 TEST_ROUNDS = 1
@@ -328,6 +328,26 @@ MAX_LATENCY_MS = 10000
 
 _SESSION = requests.Session()
 _SESSION.trust_env = False
+
+
+# ============================================================
+# Cipher blocklist (Xray v25+ removed / v26 rejects)
+# ============================================================
+BLOCKED_CIPHERS = {
+    "none", "plain", "table",
+    "rc4", "rc4-md5", "rc4-md5-6",
+}
+
+
+def _is_cipher_supported(method: str) -> bool:
+    m = (method or "").strip().lower()
+    if not m:
+        return False
+    if m in BLOCKED_CIPHERS:
+        return False
+    if m.startswith("rc4"):
+        return False
+    return True
 
 
 # ============================================================
@@ -422,7 +442,7 @@ def download_configs():
 
 
 # ============================================================
-# Parse (STRICT: only ss+v2ray-plugin+ws+tls+443)
+# Parse (STRICT: only ss+v2ray-plugin+ws+tls+443, valid cipher)
 # ============================================================
 
 def parse_config(line: str):
@@ -468,6 +488,10 @@ def parse_config(line: str):
         if port != 443:
             return None
 
+        # ─── cipher filter (Xray v25+/v26 rejects these) ───
+        if not _is_cipher_supported(method):
+            return None
+
         parts = plugin_str.split(";")
         plugin_name = parts[0]
         opts = {}
@@ -507,7 +531,8 @@ def parse_config(line: str):
 
 
 # ============================================================
-# Xray config builder (uses CLOUDFLARE_IP, SNI/Host = original)
+# Xray config builder
+# (uses CLOUDFLARE_IP, SNI/Host = original, v26 wsSettings.host)
 # ============================================================
 
 def make_xray_config(config, local_port):
@@ -523,8 +548,8 @@ def make_xray_config(config, local_port):
             "protocol": "shadowsocks",
             "settings": {
                 "servers": [{
-                    "address": CLOUDFLARE_IP,       # ← Cloudflare IP
-                    "port": config["port"],         # 443
+                    "address": CLOUDFLARE_IP,
+                    "port": config["port"],
                     "method": config["method"],
                     "password": config["password"],
                     "level": 0,
@@ -534,10 +559,12 @@ def make_xray_config(config, local_port):
                 "network": "ws",
                 "security": "tls",
                 "tlsSettings": {
-                    "serverName": config["plugin"]["host"],   # SNI = original host
+                    "serverName": config["plugin"]["host"],
                 },
                 "wsSettings": {
                     "path": config["plugin"]["path"],
+                    # v26 canonical + v25 backward-compat header
+                    "host": config["plugin"]["host"],
                     "headers": {"Host": config["plugin"]["host"]},
                 },
             },
@@ -550,7 +577,6 @@ def make_xray_config(config, local_port):
 # ============================================================
 
 def _rebuild_output_uri(config):
-    """Rebuild ss:// URI preserving everything but server host."""
     orig = config["original"]
     raw = orig[5:]
 
@@ -565,14 +591,14 @@ def _rebuild_output_uri(config):
         query_suffix = "?" + query_part
 
     if "@" not in raw:
-        return orig  # shouldn't happen
+        return orig
 
     userinfo, _old_server = raw.rsplit("@", 1)
     return f"ss://{userinfo}@{CLOUDFLARE_IP}:{config['port']}{query_suffix}{tag_suffix}"
 
 
 # ============================================================
-# Validation / run
+# Validation (filter out Warning/Info noise → show real error)
 # ============================================================
 
 def validate_xray_config(config_file):
@@ -583,8 +609,15 @@ def validate_xray_config(config_file):
         )
         if result.returncode != 0:
             msg = (result.stderr or result.stdout or "").strip()
-            lines = [ln for ln in msg.splitlines() if ln.strip()]
-            return False, " | ".join(lines[-2:])[:250]
+            lines = [ln.strip() for ln in msg.splitlines() if ln.strip()]
+            # Drop noise lines so the real error is visible
+            err_lines = [
+                ln for ln in lines
+                if "[Warning]" not in ln and "[Info]" not in ln
+            ]
+            if not err_lines:
+                err_lines = lines
+            return False, " | ".join(err_lines[-2:])[:400]
         return True, None
     except subprocess.TimeoutExpired:
         return False, "xray_test_timeout"
@@ -601,6 +634,10 @@ def _read_log(log_file, max_lines=3, max_chars=250):
         return ""
 
 
+# ============================================================
+# Test one config
+# ============================================================
+
 def test_config(index, config):
     local_port = BASE_PORT + index
     config_file = None
@@ -611,7 +648,7 @@ def test_config(index, config):
 
     base_result = {
         "index": index,
-        "line": _rebuild_output_uri(config),   # ← output uses Cloudflare IP
+        "line": _rebuild_output_uri(config),   # output uses Cloudflare IP
         "protocol": config.get("protocol", "?"),
         "server": config.get("server", "?"),
     }
@@ -629,7 +666,7 @@ def test_config(index, config):
         if not is_valid:
             print(f"[FAILED:invalid_config] {config.get('server','?')} | {err}")
             return {**base_result, "ok": False, "latency": None,
-                    "latencies": [], "reason": f"invalid_config: {err[:120]}"}
+                    "latencies": [], "reason": f"invalid_config: {err[:200]}"}
 
         log_file = tempfile.NamedTemporaryFile(suffix=".log", delete=False).name
         log_handle = open(log_file, "w")
@@ -755,10 +792,11 @@ def main():
     for key, count in parse_stats.items():
         print(f"  {key:40s}: {count}")
 
-    # Dedupe by identity (server+method+password+plugin host+path)
+    # Dedupe by identity
     def _key(c):
         return (c["server"], c["port"], c["method"], c["password"],
                 c["plugin"]["host"], c["plugin"]["path"])
+
     seen = set()
     unique = []
     for c in configs:
@@ -832,9 +870,9 @@ def main():
     print(f"Failed            : {failed_count}")
 
     if failed_count:
-        print("\n--- Failure reasons ---")
+        print("\n--- Failure reasons (overall) ---")
         overall = Counter(r.get("reason", "unknown") for r in failed_results)
-        for reason, count in overall.most_common(10):
+        for reason, count in overall.most_common(15):
             pct = 100 * count / failed_count
             print(f"  {count:5d} ({pct:5.1f}%)  {reason}")
 
