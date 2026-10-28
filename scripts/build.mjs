@@ -1,186 +1,443 @@
-// build.mjs — يجمع أي SS مع ws + tls + 443، يطبق Test حقيقي ويقيس Delay
 import { promises as fs } from 'node:fs';
-import tls from 'node:tls';
+import { spawn, execFile } from 'node:child_process';
+import net from 'node:net';
+import { promisify } from 'node:util';
 
-const env = (k, d) => (process.env[k] || d).split(',').map(s => s.trim()).filter(Boolean);
+const execFileAsync = promisify(execFile);
 
-// الليستة اللي عطيتيها
-const CF_IPS = env('CF_IPS', '104.18.37.127,x.com,www.getlucky.com,104.18.36.146,172.64.150.129,172.64.151.110,canary-proxsee-cf.pscp.tv,game01.circus.nl,104.18.41.245,185.199.108.153,api.server.io,104.16.132.229');
+const env = (key, fallback) =>
+  (process.env[key] || fallback)
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
 
-const SOURCES = env('SOURCES', [
-  'https://github.com/0xRadikal/Free-v2ray-Configs/raw/refs/heads/main/all/configs.txt',
-  'https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt',
-  'https://raw.githubusercontent.com/MustafaBaqer/VestraNet-Nodes/refs/heads/main/subscriptions/mix-normal.txt',
-  'https://raw.githubusercontent.com/ByeWhiteLists/ByeWhiteLists2/refs/heads/main/ByeWhiteLists2.txt',
-  'https://github.com/YawStar/Proxy-Hunter/raw/refs/heads/main/configs/proxy_configs.txt',
-  'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/tls.txt',
-  'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/all.txt',
-  'https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/Eternity'
-].join(','));
+const CF_IPS = env(
+  'CF_IPS',
+  '104.18.37.127,x.com,www.getlucky.com,104.18.36.146,172.64.150.129,172.64.151.110,canary-proxsee-cf.pscp.tv,game01.circus.nl,104.18.41.245,185.199.108.153,api.server.io,104.16.132.229'
+);
 
-const OUT = 'dist', MAX_OUT = 200, CONC = 30, T = 5000;
+const SOURCES = env(
+  'SOURCES',
+  [
+    'https://github.com/0xRadikal/Free-v2ray-Configs/raw/refs/heads/main/all/configs.txt',
+    'https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt',
+    'https://raw.githubusercontent.com/MustafaBaqer/VestraNet-Nodes/refs/heads/main/subscriptions/mix-normal.txt',
+    'https://raw.githubusercontent.com/ByeWhiteLists/ByeWhiteLists2/refs/heads/main/ByeWhiteLists2.txt',
+    'https://github.com/YawStar/Proxy-Hunter/raw/refs/heads/main/configs/proxy_configs.txt',
+    'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/tls.txt',
+    'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/all.txt',
+    'https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/Eternity'
+  ].join(',')
+);
 
-// ------------------------------------------------------------------
-// 🟢 دالة الفحص الحقيقي (TLS Handshake + HTTP GET)
-// ------------------------------------------------------------------
-function realTest(cfIp, sni) {
-  return new Promise((resolve) => {
-    const start = Date.now();
-    const socket = tls.connect({
-      host: cfIp,
-      port: 443,
-      servername: sni,
-      rejectUnauthorized: false,
-      timeout: T
-    }, () => {
-      const req = `GET / HTTP/1.1\r\nHost: ${sni}\r\nUser-Agent: Mozilla/5.0\r\nConnection: close\r\n\r\n`;
-      socket.write(req);
-    });
+const OUT = 'dist';
+const MAX_OUT = 200;
+const MAX_TEST = Number(process.env.MAX_TEST || 1000);
+const CONC = 8;
+const TIMEOUT = 9000;
+const TEST_URL = 'https://www.google.com/generate_204';
 
-    socket.on('data', (chunk) => {
-      const text = chunk.toString();
-      if (text.includes('HTTP/1.1') || text.includes('HTTP/1.0')) {
-        const delay = Date.now() - start;
-        socket.destroy();
-        resolve(delay);
+let tested = 0;
+let nextPort = 21000;
+
+function decodeBase64(value) {
+  try {
+    const normalized = value
+      .replace(/-/g, '+')
+      .replace(/_/g, '/');
+
+    return Buffer.from(normalized, 'base64').toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
+function decodeCredentials(rawUserinfo) {
+  let value;
+
+  try {
+    value = decodeURIComponent(rawUserinfo);
+  } catch {
+    value = rawUserinfo;
+  }
+
+  if (value.includes(':')) {
+    const index = value.indexOf(':');
+    return {
+      method: value.slice(0, index),
+      password: value.slice(index + 1)
+    };
+  }
+
+  const decoded = decodeBase64(value);
+  const index = decoded.indexOf(':');
+
+  if (index <= 0) return null;
+
+  return {
+    method: decoded.slice(0, index),
+    password: decoded.slice(index + 1)
+  };
+}
+
+function parseSS(line) {
+  const raw = (line || '').trim();
+
+  if (!raw.startsWith('ss://') || raw.length > 2000) {
+    return null;
+  }
+
+  let url;
+
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+
+  if (url.protocol !== 'ss:' || url.port !== '443') {
+    return null;
+  }
+
+  const plugin = url.searchParams.get('plugin') || '';
+  if (!plugin) return null;
+
+  const parts = plugin.split(';');
+  const pluginName = parts.shift().trim().toLowerCase();
+  const options = parts.filter(Boolean);
+
+  const hasTLS = options.some(option =>
+    option.toLowerCase() === 'tls'
+  );
+
+  const mode = options.find(option =>
+    option.toLowerCase().startsWith('mode=')
+  );
+
+  // v2ray-plugin uses WebSocket by default.
+  // Do not mistake QUIC or another transport for WebSocket.
+  if (!hasTLS) return null;
+
+  if (
+    mode &&
+    !['mode=websocket', 'mode=ws'].includes(mode.toLowerCase())
+  ) {
+    return null;
+  }
+
+  const hostOption = options.find(option =>
+    option.toLowerCase().startsWith('host=')
+  );
+
+  const sni = hostOption
+    ? hostOption.slice(hostOption.indexOf('=') + 1).trim()
+    : url.hostname;
+
+  if (!sni || !url.hostname) return null;
+
+  const credentials = decodeCredentials(url.username);
+
+  if (!credentials?.method || !credentials.password) {
+    return null;
+  }
+
+  // Only test plugins actually installed by this workflow.
+  // Other plugin implementations must not be reported as tested.
+  if (pluginName !== 'v2ray-plugin') {
+    return null;
+  }
+
+  return {
+    raw,
+    url,
+    originalHost: url.hostname,
+    method: credentials.method,
+    password: credentials.password,
+    plugin,
+    pluginName,
+    options,
+    sni,
+    remark: decodeURIComponentSafe(url.hash.slice(1)) || sni
+  };
+}
+
+function decodeURIComponentSafe(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function chooseRandomIp() {
+  return CF_IPS[Math.floor(Math.random() * CF_IPS.length)];
+}
+
+function rebuildLink(entry, server, delay) {
+  const url = new URL(entry.raw);
+
+  url.hostname = server;
+  url.port = '443';
+  url.hash = encodeURIComponent(`${entry.remark} | ${delay}ms`);
+
+  return url.toString();
+}
+
+function waitForPort(port, child, timeout = 4000) {
+  return new Promise(resolve => {
+    const started = Date.now();
+
+    function attempt() {
+      if (child.exitCode !== null) {
+        resolve(false);
+        return;
       }
-    });
 
-    socket.on('error', () => { socket.destroy(); resolve(null); });
-    socket.on('timeout', () => { socket.destroy(); resolve(null); });
+      const socket = net.connect({
+        host: '127.0.0.1',
+        port
+      });
+
+      let finished = false;
+
+      const done = result => {
+        if (finished) return;
+        finished = true;
+        socket.destroy();
+
+        if (result) {
+          resolve(true);
+        } else if (Date.now() - started >= timeout) {
+          resolve(false);
+        } else {
+          setTimeout(attempt, 100);
+        }
+      };
+
+      socket.setTimeout(300);
+      socket.once('connect', () => done(true));
+      socket.once('error', () => done(false));
+      socket.once('timeout', () => done(false));
+    }
+
+    attempt();
   });
 }
 
-// ------------------------------------------------------------------
-// 🟢 قراءة وتصفية SS (مرن)
-// ------------------------------------------------------------------
-function parseSS(line) {
-  const raw = (line || '').trim();
-  if (!raw.startsWith('ss://') || raw.length > 2000) return null;
-  
-  const parts = raw.split('#');
-  const cleanLink = parts[0];
-  
-  let remark = '';
-  if (parts[1]) {
-    try { remark = decodeURIComponent(parts[1]); } catch (e) { remark = parts[1]; }
+async function realTest(entry, server) {
+  const port = nextPort++;
+  const pluginOptions = entry.options.join(';');
+
+  const args = [
+    '-s', server,
+    '-p', '443',
+    '-m', entry.method,
+    '-k', entry.password,
+    '-b', '127.0.0.1',
+    '-l', String(port),
+    '-t', '8',
+    '--plugin', 'v2ray-plugin',
+    '--plugin-opts', pluginOptions
+  ];
+
+  const child = spawn('ss-local', args, {
+    stdio: 'ignore'
+  });
+
+  try {
+    const ready = await waitForPort(port, child);
+
+    if (!ready) return null;
+
+    const start = Date.now();
+
+    const { stdout } = await execFileAsync(
+      'curl',
+      [
+        '--silent',
+        '--show-error',
+        '--output', '/dev/null',
+        '--write-out', '%{http_code}',
+        '--connect-timeout', '4',
+        '--max-time', '8',
+        '--socks5-hostname', `127.0.0.1:${port}`,
+        TEST_URL
+      ],
+      {
+        timeout: TIMEOUT + 1000,
+        maxBuffer: 1024 * 1024
+      }
+    );
+
+    const delay = Date.now() - start;
+    const status = Number(stdout.trim());
+
+    if (status < 200 || status >= 400) return null;
+
+    return delay;
+  } catch {
+    return null;
+  } finally {
+    child.kill('SIGTERM');
+
+    setTimeout(() => {
+      if (child.exitCode === null) {
+        child.kill('SIGKILL');
+      }
+    }, 300).unref();
   }
-
-  const body = cleanLink.slice(5);
-  if (!body.includes('@')) return null; 
-
-  const atIdx = body.indexOf('@');
-  const userinfo = body.slice(0, atIdx);
-  const rest = body.slice(atIdx + 1);
-  
-  const qIdx = rest.indexOf('?');
-  if (qIdx === -1) return null;
-
-  const hostPort = rest.slice(0, qIdx);
-  const query = rest.slice(qIdx + 1);
-
-  const colonIdx = hostPort.lastIndexOf(':');
-  if (colonIdx === -1) return null;
-  
-  const host = hostPort.slice(0, colonIdx);
-  const port = parseInt(hostPort.slice(colonIdx + 1), 10);
-  
-  if (port !== 443) return null; 
-
-  const params = new URLSearchParams(query);
-  const plugin = params.get('plugin') || '';
-  const lowerPlugin = plugin.toLowerCase();
-
-  // 🟢 التوسيع: أي بلوڭين فيه tls و ws (سواء v2ray-plugin, xray-plugin, ولا أي حاجة فيها ws/websocket)
-  if (!lowerPlugin.includes('tls')) return null;
-  if (!lowerPlugin.includes('ws') && !lowerPlugin.includes('v2ray') && !lowerPlugin.includes('xray')) return null;
-
-  // استخراج الـ SNI من الـ plugin
-  const pluginParts = plugin.split(';');
-  const hostOpt = pluginParts.find(p => p.startsWith('host='));
-  const sni = hostOpt ? hostOpt.replace('host=', '').trim() : host;
-
-  return { userinfo, plugin, sni, remark: remark || sni };
 }
 
-// ------------------------------------------------------------------
-// 🟢 إعادة بناء الرابط بالـ IP ديال CF
-// ------------------------------------------------------------------
-function rebuildLink(e, cfIp) {
-  return `ss://${e.userinfo}@${cfIp}:443?plugin=${encodeURIComponent(e.plugin)}#${encodeURIComponent(e.remark + ' | ' + e.delay + 'ms')}`;
-}
+async function pool(items, concurrency, fn) {
+  const results = new Array(items.length);
+  let index = 0;
 
-async function pool(items, n, fn) {
-  const out = new Array(items.length); let i = 0;
-  await Promise.all(Array.from({ length: Math.min(n, items.length) || 1 }, async () => {
-    while (true) { 
-      const k = i++; 
-      if (k >= items.length) return;
-      try { out[k] = await fn(items[k]); } catch { out[k] = null; } 
-    }
-  }));
-  return out;
+  await Promise.all(
+    Array.from(
+      { length: Math.min(concurrency, items.length) },
+      async () => {
+        while (true) {
+          const current = index++;
+
+          if (current >= items.length) return;
+
+          try {
+            results[current] = await fn(items[current]);
+          } catch {
+            results[current] = null;
+          }
+        }
+      }
+    )
+  );
+
+  return results;
 }
 
 async function getText(url) {
-  const c = new AbortController(); const t = setTimeout(() => c.abort(), 30000);
-  try { const r = await fetch(url, { signal: c.signal }); return r.ok ? await r.text() : null; }
-  catch { return null; } finally { clearTimeout(t); }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'user-agent': 'NeverStops-Config-Collector/1.0'
+      }
+    });
+
+    if (!response.ok) {
+      console.log(`[!] Source HTTP ${response.status}: ${url}`);
+      return null;
+    }
+
+    return await response.text();
+  } catch {
+    console.log(`[!] Source failed: ${url}`);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function expandText(text) {
+  const trimmed = text.trim();
+
+  if (!trimmed) return [];
+
+  // Decode a subscription only when it looks like Base64,
+  // rather than decoding ordinary plain-text configurations.
+  if (!trimmed.includes('://') && /^[A-Za-z0-9+/_=-]+$/.test(trimmed)) {
+    const decoded = decodeBase64(trimmed);
+
+    if (decoded.includes('ss://')) {
+      return decoded.split(/\r?\n/);
+    }
+  }
+
+  return trimmed.split(/\r?\n/);
 }
 
 async function main() {
   await fs.mkdir(OUT, { recursive: true });
-  const texts = (await Promise.all(SOURCES.map(getText))).filter(Boolean);
-  console.log(`[+] مصادر: ${texts.length}/${SOURCES.length}`);
-  if (!texts.length) throw new Error('ما كاين حتى مصدر');
 
-  const lines = texts.flatMap(t => {
-    const s = t.trim();
-    let body = s;
-    if (!s.includes('://')) {
-      try { body = Buffer.from(s, 'base64').toString('utf8'); } catch(e) {}
+  console.log(`[+] Sources: ${SOURCES.length}`);
+  console.log(`[+] Replacement addresses: ${CF_IPS.length}`);
+
+  const texts = (await Promise.all(SOURCES.map(getText)))
+    .filter(Boolean);
+
+  console.log(`[+] Sources downloaded: ${texts.length}/${SOURCES.length}`);
+
+  if (!texts.length) {
+    throw new Error('No source could be downloaded');
+  }
+
+  const lines = texts.flatMap(expandText);
+  const unique = [];
+  const seen = new Set();
+
+  for (const line of lines) {
+    const entry = parseSS(line);
+
+    if (!entry) continue;
+
+    const key = [
+      entry.method,
+      entry.password,
+      entry.originalHost,
+      entry.plugin
+    ].join('|');
+
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    unique.push(entry);
+  }
+
+  console.log(`[+] Unique compatible SS+WS+TLS+443: ${unique.length}`);
+
+  const candidates = unique.slice(0, MAX_TEST);
+  const live = [];
+
+  await pool(candidates, CONC, async entry => {
+    const server = chooseRandomIp();
+    const delay = await realTest(entry, server);
+
+    const count = ++tested;
+
+    if (count % 25 === 0 || count === candidates.length) {
+      console.log(`[+] Tested ${count}/${candidates.length}; working: ${live.length}`);
     }
-    return body.split(/\r?\n/);
+
+    if (delay !== null) {
+      live.push({
+        entry,
+        server,
+        delay
+      });
+    }
   });
 
-  const seen = new Set(), uniq = [];
-  for (const l of lines) {
-    const e = parseSS(l); 
-    if (!e) continue;
-    const k = `${e.userinfo}|${e.sni}|${e.plugin}`;
-    if (seen.has(k)) continue; 
-    seen.add(k); 
-    uniq.push(e);
-  }
-  console.log(`[+] SS+WS+TLS فريد: ${uniq.length}`);
-
-  const list = uniq.slice(0, 1000); 
-  let n = 0;
-  
-  // الفحص الحقيقي
-  const live = (await pool(list, CONC, async e => {
-    const cfIp = CF_IPS[Math.floor(Math.random() * CF_IPS.length)];
-    const delay = await realTest(cfIp, e.sni);
-    
-    if (++n % 50 === 0) console.log(`    فحص ${n}/${list.length}`);
-    
-    return delay !== null ? { ...e, cfIp, delay } : null;
-  })).filter(Boolean);
-
-  // ترتيب حسب الأسرع
   live.sort((a, b) => a.delay - b.delay);
 
-  console.log(`[+] حي (نجح الـ Real Test): ${live.length}`);
+  const finalLinks = live
+    .slice(0, MAX_OUT)
+    .map(item =>
+      rebuildLink(item.entry, item.server, item.delay)
+    );
 
-  if (live.length === 0) {
-    console.log('⚠️ ما لقيناش حتى واحد حي كيدوز من CF.');
-    return;
-  }
+  await fs.writeFile(
+    `${OUT}/ss-ws.txt`,
+    finalLinks.length ? `${finalLinks.join('\n')}\n` : '',
+    'utf8'
+  );
 
-  const finalLinks = live.slice(0, MAX_OUT).map(e => rebuildLink(e, e.cfIp));
-
-  await fs.writeFile(`${OUT}/ss-ws.txt`, finalLinks.join('\n') + '\n');
-  console.log('[✓] dist/ss-ws.txt تم إنشاؤه بنجاح (مرتب من الأسرع للأبطأ)');
+  console.log(`[+] Successful real HTTP tests: ${live.length}`);
+  console.log(`[✓] Wrote ${finalLinks.length} links to ${OUT}/ss-ws.txt`);
 }
 
-main().catch(e => { console.error('FAILED:', e); process.exit(1); });
+main().catch(error => {
+  console.error('FAILED:', error);
+  process.exitCode = 1;
+});
