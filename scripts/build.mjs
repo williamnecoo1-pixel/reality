@@ -1,36 +1,67 @@
-// scripts/reality.mjs — يستخرج VLESS+REALITY ويولّد جوج نسخ: بلا SNI / بـSNI مسموح
+// ss-ws.mjs — يستخرج Shadowsocks + v2ray-plugin (TLS) ويختبر الاتصال
 import { promises as fs } from 'node:fs';
 import net from 'node:net';
 
 const env = (k, d) => (process.env[k] || d).split(',').map(s => s.trim()).filter(Boolean);
 
+// المصادر (يمكنك زيادة مصادر أخرى هنا)
 const SOURCES = env('SOURCES', [
   'https://github.com/0xRadikal/Free-v2ray-Configs/raw/refs/heads/main/all/configs.txt',
+  'https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt',
+  'https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/Eternity'
 ].join(','));
 
-const NO_SNI = env('NO_SNI_IPS', '104.18.37.127,104.18.36.146,172.64.150.129,172.64.151.110');
-const OK_SNI = env('OK_SNIS', 'x.com,www.instagram.com,web.whatsapp.com,www.facebook.com,snapchat.com');
-
 const OUT = 'dist', MAX_OUT = 250, CONC = 40, T = 4000;
-const isIPv4 = s => /^\d{1,3}(\.\d{1,3}){3}$/.test(s);
 
-function parse(line) {
+function parseSS(line) {
   const raw = (line || '').trim();
-  if (!raw.startsWith('vless://') || raw.length > 2000) return null;
-  let u; try { u = new URL(raw); } catch { return null; }
-  const p = u.searchParams;
-  if ((p.get('security') || '').toLowerCase() !== 'reality') return null;
-  const pbk = p.get('pbk'); if (!pbk) return null;
-  const addr = u.hostname.replace(/^\[|\]$/g, '');
-  const port = Number(u.port || 443);
-  if (!addr || !port) return null;
+  if (!raw.startsWith('ss://') || raw.length > 2000) return null;
+  
+  // فصل الرابط عن الاسم (Remark)
+  const parts = raw.split('#');
+  const cleanLink = parts[0];
+  const remark = parts[1] ? decodeURIComponent(parts[1]) : '';
+
+  const body = cleanLink.slice(5); // إزالة ss://
+  
+  // فحص إذا كان التنسيق SIP002 (فيه @)
+  if (!body.includes('@')) return null; 
+
+  const atIdx = body.indexOf('@');
+  const userinfo = body.slice(0, atIdx);
+  const rest = body.slice(atIdx + 1);
+  
+  const qIdx = rest.indexOf('?');
+  if (qIdx === -1) return null; // ما كاينش plugin
+
+  const hostPort = rest.slice(0, qIdx);
+  const query = rest.slice(qIdx + 1);
+
+  const [host, portStr] = hostPort.split(':');
+  const port = parseInt(portStr, 10);
+  
+  if (port !== 443) return null; // نبقاو غير على 443
+
+  const params = new URLSearchParams(query);
+  const plugin = params.get('plugin') || '';
+  
+  // خاصنا v2ray-plugin و tls
+  if (!plugin.toLowerCase().includes('v2ray-plugin')) return null;
+  if (!plugin.toLowerCase().includes('tls')) return null;
+
+  // استخراج host من الـ plugin (اختياري للاسم فقط)
+  const pluginParts = plugin.split(';');
+  const hostOpt = pluginParts.find(p => p.startsWith('host='));
+  const realHost = hostOpt ? hostOpt.replace('host=', '') : host;
+
   return {
-    uuid: decodeURIComponent(u.username || ''), addr, port,
-    type: (p.get('type') || 'tcp').toLowerCase(), pbk,
-    sid: p.get('sid') || '', fp: p.get('fp') || 'chrome',
-    spx: p.get('spx') || '/', flow: p.get('flow') || '',
-    sni: (p.get('sni') || '').toLowerCase(),
-    name: decodeURIComponent((u.hash || '').slice(1)) || addr,
+    raw: cleanLink,
+    host,
+    port,
+    realHost,
+    userinfo,
+    plugin,
+    remark: remark || realHost
   };
 }
 
@@ -51,12 +82,9 @@ async function pool(items, n, fn) {
   return out;
 }
 
-function link(e, sni) {
-  const q = new URLSearchParams({ type: e.type, security: 'reality', sni, fp: e.fp, pbk: e.pbk });
-  if (e.sid) q.set('sid', e.sid);
-  if (e.spx) q.set('spx', e.spx);
-  if (e.flow) q.set('flow', e.flow);          // ما نزيدوهش من عندنا — نعيّطو غير اللي كان
-  return `vless://${e.uuid}@${e.addr}:${e.port}?${q}#${encodeURIComponent(`${e.name} | ${sni}`)}`;
+function rebuildLink(e) {
+  // كنعاودو نبنيو الرابط باش يكون نقي
+  return `ss://${e.userinfo}@${e.host}:${e.port}?plugin=${encodeURIComponent(e.plugin)}#${encodeURIComponent(e.remark)}`;
 }
 
 async function getText(url) {
@@ -73,32 +101,46 @@ async function main() {
 
   const lines = texts.flatMap(t => {
     const s = t.trim();
-    const body = s.includes('://') ? s : Buffer.from(s, 'base64').toString('utf8');
+    // بعض السورسات كيكونو Base64
+    let body = s;
+    if (!s.includes('://')) {
+      try { body = Buffer.from(s, 'base64').toString('utf8'); } catch(e) {}
+    }
     return body.split(/\r?\n/);
   });
 
   const seen = new Set(), uniq = [];
   for (const l of lines) {
-    const e = parse(l); if (!e) continue;
-    const k = `${e.uuid}|${e.addr}|${e.port}`;
-    if (seen.has(k)) continue; seen.add(k); uniq.push(e);
+    const e = parseSS(l); if (!e) continue;
+    const k = `${e.userinfo}|${e.host}|${e.port}|${e.plugin}`;
+    if (seen.has(k)) continue; 
+    seen.add(k); 
+    uniq.push(e);
   }
-  console.log(`[+] REALITY فريد: ${uniq.length}`);
+  console.log(`[+] SS+WS+TLS فريد: ${uniq.length}`);
 
-  const list = uniq.slice(0, 1500); let n = 0;
+  const list = uniq.slice(0, 1500); 
+  let n = 0;
+  
+  // فحص الـ TCP
   const live = (await pool(list, CONC, async e => {
-    const ok = await tcpAlive(e.addr, e.port);
+    const ok = await tcpAlive(e.host, e.port);
     if (++n % 200 === 0) console.log(`    فحص ${n}/${list.length}`);
     return ok ? e : null;
   })).filter(Boolean).slice(0, MAX_OUT);
-  console.log(`[+] حي: ${live.length}`);
+  
+  console.log(`[+] حي (TCP Open): ${live.length}`);
 
-  const nosni  = live.map((e, i) => link(e, NO_SNI[i % NO_SNI.length]));
-  const withsni = live.map((e, i) => link(e, e.sni && !isIPv4(e.sni) ? e.sni : OK_SNI[i % OK_SNI.length]));
+  // بناء الروابط النهائية
+  const finalLinks = live.map(e => rebuildLink(e));
 
-  await fs.writeFile(`${OUT}/reality-nosni.txt`, nosni.join('\n') + '\n');
-  await fs.writeFile(`${OUT}/reality-sni.txt`, withsni.join('\n') + '\n');
-  await fs.writeFile(`${OUT}/reality-sub-nosni.txt`, Buffer.from(nosni.join('\n')).toString('base64') + '\n');
-  console.log('[✓] dist/reality-nosni.txt + reality-sni.txt');
+  if (finalLinks.length === 0) {
+    console.log('⚠️ ما لقيناش حتى واحد حي. (هادي نتيجة عادية حيت SS+WS نادرين فـ GitHub)');
+    return;
+  }
+
+  await fs.writeFile(`${OUT}/ss-ws.txt`, finalLinks.join('\n') + '\n');
+  console.log('[✓] dist/ss-ws.txt تم إنشاؤه بنجاح');
 }
+
 main().catch(e => { console.error('FAILED:', e); process.exit(1); });
