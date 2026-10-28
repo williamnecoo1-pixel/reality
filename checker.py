@@ -7,12 +7,15 @@ import tempfile
 import time
 import base64
 from statistics import median
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote
 from collections import Counter
 
 import requests
 
 
+# ============================================================
+# CONFIG
+# ============================================================
 SOURCE_URLS = [
     "https://raw.githubusercontent.com/MustafaBaqer/VestraNet-Nodes/refs/heads/main/subscriptions/mix-normal.txt",
   "https://github.com/barry-far/V2ray-Config/raw/refs/heads/main/All_Configs_Sub.txt",
@@ -214,18 +217,109 @@ SOURCE_URLS = [
     "https://raw.githubusercontent.com/asgharkapk/Sub-Config-Extractor/refs/heads/main/output_configs/mixed/10ium/V2Hub3/merged_base64.yaml",
     "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/base64/split/countries/NL.txt",
     "https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/014.txt",
-    # 👇 ضف هنا روابط subscription ديال SS إلا عندك
+    "https://raw.githubusercontent.com/EEvanescence/4Diana/main/AllConfigsSub.txt",
+    "https://raw.githubusercontent.com/hamedcode/port-based-v2ray-configs/main/detailed/vless/2087.txt",
+    "https://raw.githubusercontent.com/hamedcode/port-based-v2ray-configs/main/sub/port_8880.txt",
+    "https://alireza786786.github.io/Free-V2ray-Configs/servers/trojan.txt",
+    "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/base64/subs/sub29.txt",
+    "https://raw.githubusercontent.com/kasesm/Free-Config/refs/heads/main/trojan_raw.txt",
+    "https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/024.txt",
+    "https://raw.githubusercontent.com/noahclanman/free-xray-gcp/main/output/transports/tls.txt",
+    "https://raw.githubusercontent.com/chenzhihan1751-cyber/node-sub-zixf/main/sub/base64.txt",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/split/countries/DE.txt",
+    "https://raw.githubusercontent.com/miraali1372/mirsub/main/subscription.txt",
+    "https://raw.githubusercontent.com/B3B3097/REMAININGCONNECTIONS/main/data/subscriptions_found.json",
+    "https://raw.githubusercontent.com/Delta-Kronecker/V2ray-Config/refs/heads/main/config/patt/all.txt",
+    "https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/top100.txt",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/split/protocols/vless.txt",
+    "https://raw.githubusercontent.com/MahanKenway/Freedom-V2Ray/main/configs/vless.txt",
+    "https://raw.githubusercontent.com/Meret2019/vless-subscription/HEAD/subscription.txt",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/normal/10ium-telegram-configs-collector-reality",
+    "https://raw.githubusercontent.com/SoliSpirit/SolVPN/main/Protocols/vless.txt",
+    "https://raw.githubusercontent.com/lorenzazy7kenyon/free-vpn-subscriptions/main/output/by-country/v2ray-base64-NL.txt",
+    "https://raw.githubusercontent.com/hamedcode/port-based-v2ray-configs/main/sub/port_2095.txt",
+    "https://raw.githubusercontent.com/Danialsamadi/v2go/main/AllConfigsSub.txt",
+    "https://raw.githubusercontent.com/chenzhihan1751-cyber/node-sub-zixf/HEAD/sub/base64.txt",
+    "https://raw.githubusercontent.com/PlanAslii/vira-v2ray-configs/main/protocols/vless.txt",
+    "https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/020.txt",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/base64/split/countries/IR.txt",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/base64/Delta-Kronecker_trojan",
+    "https://raw.githubusercontent.com/SoliSpirit/SolVPN/main/Protocols/trojan.txt",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/normal/0xRadikal-Free-v2ray-verified.txt",
+    "https://raw.githubusercontent.com/Seyedhub/Subscription/HEAD/sub.txt",
+    "https://raw.githubusercontent.com/pashadolf/Eternal-Sub/main/Github-Gemini.txt",
+    "https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/all-verified/v2ray-base64-0003.txt",
+    "https://raw.githubusercontent.com/sinavm/SVM/main/subscriptions/xray/normal/mix",
+    "https://raw.githubusercontent.com/mohamadfg-dev/telegram-v2ray-configs-collector/main/category/Canada.txt",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/base64/0xRadikal-Free-v2ray-fast.txt",
+    "https://raw.githubusercontent.com/LeilaoMi/AutoMergePublicNodes-Optimized/main/output/verified.txt",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/base64/0xRadikal-Free-v2ray-verified.txt",
+    "https://raw.githubusercontent.com/pie-with-jam/PulseProxy/main/githubmirror/13.txt",
+    "https://raw.githubusercontent.com/Delta-Kronecker/V2ray-Config/refs/heads/main/config/countries/us.txt",
+    "https://raw.githubusercontent.com/gbcwror/v2ray-tester/HEAD/configs/trojan/trojan-1.txt",
+    "https://raw.githubusercontent.com/R3ZARAHIMI/tg-v2ray-configs-every2h/main/conf-week.txt",
+    "https://gh-proxy.com/https://raw.githubusercontent.com/chenzhihan1751-cyber/node-sub-zixf/main/sub/base64.txt",
+    "https://raw.githubusercontent.com/pie-with-jam/PulseProxy/main/githubmirror/18.txt",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/base64/split/ipv4.txt",
+    "https://raw.githubusercontent.com/YawStar/Proxy-Hunter/refs/heads/main/configs/proxy_configs_deduplicated.txt",
+    "https://raw.githubusercontent.com/cbusifabcap/daily_free_vpn/main/sub/sub.yml",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/normal/10ium-V2Hub3-trojan",
+    "https://raw.githubusercontent.com/svinakraft-maker/FlareFeed/main/public/Top500.txt",
+    "https://raw.githack.com/sakazxc1400-creator/free-vpn-sub/data/output/sub.txt",
+    "https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/021.txt",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/split/xhttp.txt",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/normal/0xRadikal-Free-v2ray-top100.txt",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/base64/0xRadikal-Free-v2ray-top100.txt",
+    "https://raw.githubusercontent.com/chenzhihan1751-cyber/node-sub-zixf/HEAD/sub/v2ray.txt",
+    "https://raw.githubusercontent.com/aviamastersgh/vpn-free-russia/main/verified_configs.txt",
+    "https://raw.githubusercontent.com/sinavm/SVM/main/lite/subscriptions/xray/normal/alive-fast",
+    "https://raw.githubusercontent.com/itsyebekhe/PSG/main/config.txt",
+    "https://raw.githubusercontent.com/drmikecrypto/PulseConfigs/HEAD/verified/configs_base64.txt",
+    "https://raw.githubusercontent.com/drmikecrypto/PulseConfigs/main/verified/configs_base64.txt",
+    "https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list_raw.txt",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/normal/10ium-telegram-configs-collector-non-tls",
+    "https://raw.githubusercontent.com/rekt0ro/ProxyRift/main/subscriptions/light-base64.txt",
+    "https://raw.githubusercontent.com/PlanAslii/vira-v2ray-configs/main/all.txt",
+    "https://raw.githubusercontent.com/Diversan313/apex-parser/main/subs/main/alive_plain_full.txt",
+    "https://raw.githubusercontent.com/Diversan313/apex-parser/main/subs/main/alive_bl.txt",
+    "https://raw.githubusercontent.com/noahclanman/free-xray-gcp/main/output/transports/ws_tls_base64.txt",
+    "https://raw.githubusercontent.com/drmikecrypto/PulseConfigs/HEAD/protocols/vless_base64.txt",
+    "https://raw.githubusercontent.com/hamedcode/port-based-v2ray-configs/main/sub/trojan.txt",
+    "https://raw.githubusercontent.com/shabane/kamaji/master/hub/self/tested/trojan.txt",
+    "https://raw.githubusercontent.com/F0rc3Run/F0rc3Run/refs/heads/main/splitted-by-protocol/trojan.txt",
+    "https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/010.txt",
+    "https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/004.txt",
+    "https://raw.githubusercontent.com/rtwo2/FastNodes/main/sub/verified_tls.txt",
+    "https://raw.githubusercontent.com/Delta-Kronecker/V2ray-Config/main/config/countries/ca.txt",
+    "https://radarhub.top/v2ray.txt",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/base64/split/tls.txt",
+    "https://raw.githubusercontent.com/F0rc3Run/F0rc3Run/refs/heads/main/Best-Results/proxies.txt",
+    "https://raw.githubusercontent.com/Danialsamadi/v2go/main/Splitted-By-Protocol/vless.txt",
+    "https://raw.githubusercontent.com/rtwo2/FastNodes/main/sub/countries/MT.txt",
+    "https://raw.githubusercontent.com/roosterkid/openproxylist/main/V2RAY_BASE64.txt",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/base64/peasoft-NoMoreWalls-list_raw.txt",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/base64/roosterkid-openproxylist-V2RAY_RAW.txt",
+    "https://raw.githubusercontent.com/Mokafela/Config-Finder/master/split/sub-CA.txt",
+    "https://raw.githubusercontent.com/Delta-Kronecker/V2ray-Config/refs/heads/main/config/countries/ca.txt",
+    "https://raw.githubusercontent.com/arg9244/V2R-Subs/HEAD/subs/1000/017.txt",
+    "https://alireza786786.github.io/Free-V2ray-Configs/servers/vless.txt",
+    "https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/all-verified/v2ray-base64-0004.txt",
+    "https://raw.githubusercontent.com/MahanKenway/Freedom-V2Ray/HEAD/configs/mix.txt",
+    "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/data/githubmirror/ru-sni-local/vless.txt",
+    "https://raw.githubusercontent.com/10Dream/sub-mod/main/sub/base64/10ium-V2Hub3-trojan",
 ]
 XRAY = "./xray/xray"
 
-# ============ TEST URLs (fallback chain) ============
+# ← Cloudflare IP used for BOTH testing AND output
+CLOUDFLARE_IP = "104.18.37.127"
+
 TEST_URLS = [
     "http://cp.cloudflare.com/generate_204",
     "http://www.apple.com/library/test/success.html",
     "http://www.gstatic.com/generate_204",
 ]
 
-TIMEOUT = 10
+TIMEOUT = 8                # ← lowered from 10 (Cloudflare configs are fast)
 MAX_WORKERS = 40
 BASE_PORT = 20000
 TEST_ROUNDS = 1
@@ -241,14 +335,12 @@ _SESSION.trust_env = False
 # ============================================================
 
 def _b64decode(s: str) -> str:
-    """Decode base64 with missing padding, URL-safe alphabet tolerated."""
     s = s.strip().replace("-", "+").replace("_", "/")
     s += "=" * ((4 - len(s) % 4) % 4)
     return base64.b64decode(s).decode("utf-8")
 
 
 def _parse_query(query: str) -> dict:
-    """Parse SS query without turning '+' into space."""
     params = {}
     for pair in query.split("&"):
         if not pair:
@@ -262,7 +354,6 @@ def _parse_query(query: str) -> dict:
 
 
 def _parse_userinfo(userinfo: str):
-    """Return (method, password) from userinfo or None."""
     unquoted = unquote(userinfo)
     if ":" in unquoted:
         return unquoted.split(":", 1)
@@ -312,7 +403,7 @@ def test_once(proxies):
 
 
 # ============================================================
-# Download + parse
+# Download
 # ============================================================
 
 def download_configs():
@@ -330,44 +421,38 @@ def download_configs():
     return list(dict.fromkeys(configs))
 
 
+# ============================================================
+# Parse (STRICT: only ss+v2ray-plugin+ws+tls+443)
+# ============================================================
+
 def parse_config(line: str):
-    """Parse an ss:// URI. Returns dict or None."""
     if not line.startswith("ss://"):
         return None
-
     try:
         raw = line[5:].strip()
 
-        # Strip fragment (#tag)
         if "#" in raw:
             raw, _tag = raw.split("#", 1)
 
-        # Split query
-        plugin_str = ""
-        if "?" in raw:
-            raw, query = raw.split("?", 1)
-            params = _parse_query(query)
-            plugin_str = params.get("plugin", "")
+        # Plugin query is required for this strict mode
+        if "?" not in raw:
+            return None
+        raw, query = raw.split("?", 1)
+        params = _parse_query(query)
+        plugin_str = params.get("plugin", "")
+        if not plugin_str:
+            return None
 
-        # --- Decode credentials + server ---
-        if "@" in raw:
-            # SIP002 (userinfo is b64 or urlencoded, server:port)
-            userinfo, server_part = raw.rsplit("@", 1)
-            creds = _parse_userinfo(userinfo)
-            if creds is None:
-                return None
-            method, password = creds
-        else:
-            # Legacy: ss://base64(method:password@host:port)
-            decoded = _b64decode(raw)
-            if "@" not in decoded:
-                return None
-            userinfo, server_part = decoded.rsplit("@", 1)
-            if ":" not in userinfo:
-                return None
-            method, password = userinfo.split(":", 1)
+        # Reject legacy format (no plugin anyway)
+        if "@" not in raw:
+            return None
+        userinfo, server_part = raw.rsplit("@", 1)
+        creds = _parse_userinfo(userinfo)
+        if creds is None:
+            return None
+        method, password = creds
 
-        # --- Parse host:port ---
+        # host:port
         server_part = server_part.split("/", 1)[0]
         if server_part.startswith("["):
             host, rest = server_part[1:].split("]", 1)
@@ -376,98 +461,114 @@ def parse_config(line: str):
             host, port_str = server_part.rsplit(":", 1)
         port = int(port_str)
 
-        if not method or not password or not host or not port:
+        if not method or not password or not host:
             return None
 
-        config = {
+        # ─── STRICT FILTER ───
+        if port != 443:
+            return None
+
+        parts = plugin_str.split(";")
+        plugin_name = parts[0]
+        opts = {}
+        for part in parts[1:]:
+            if "=" in part:
+                k, v = part.split("=", 1)
+                opts[k] = v
+            elif part:
+                opts[part] = True
+
+        if plugin_name != "v2ray-plugin":
+            return None
+        if opts.get("mode", "websocket") != "websocket":
+            return None
+        if opts.get("tls") not in (True, "true"):
+            return None
+
+        ws_host = opts.get("host") or host
+        ws_path = opts.get("path") or "/"
+
+        return {
             "protocol": "ss",
             "server": host,
             "port": port,
             "method": method,
             "password": password,
-            "plugin": None,
+            "plugin": {
+                "name": "v2ray-plugin",
+                "tls": True,
+                "host": ws_host,
+                "path": ws_path,
+            },
             "original": line,
         }
-
-        # --- Plugin handling ---
-        if plugin_str:
-            parts = plugin_str.split(";")
-            plugin_name = parts[0]
-            opts = {}
-            for part in parts[1:]:
-                if "=" in part:
-                    k, v = part.split("=", 1)
-                    opts[k] = v
-                elif part:
-                    opts[part] = True
-
-            if plugin_name == "v2ray-plugin":
-                mode = opts.get("mode", "websocket")
-                if isinstance(mode, bool) or mode != "websocket":
-                    return None
-                tls = opts.get("tls") is True or opts.get("tls") == "true"
-                config["plugin"] = {
-                    "name": "v2ray-plugin",
-                    "tls": tls,
-                    "host": opts.get("host") or host,
-                    "path": opts.get("path") or "/",
-                }
-            else:
-                # Unsupported by Xray natively
-                return None
-
-        return config
-
     except Exception:
         return None
 
 
 # ============================================================
-# Xray config builder
+# Xray config builder (uses CLOUDFLARE_IP, SNI/Host = original)
 # ============================================================
 
 def make_xray_config(config, local_port):
-    outbound = {
-        "protocol": "shadowsocks",
-        "settings": {
-            "servers": [
-                {
-                    "address": config["server"],
-                    "port": config["port"],
+    return {
+        "log": {"loglevel": "error"},
+        "inbounds": [{
+            "listen": "127.0.0.1",
+            "port": local_port,
+            "protocol": "http",
+            "settings": {},
+        }],
+        "outbounds": [{
+            "protocol": "shadowsocks",
+            "settings": {
+                "servers": [{
+                    "address": CLOUDFLARE_IP,       # ← Cloudflare IP
+                    "port": config["port"],         # 443
                     "method": config["method"],
                     "password": config["password"],
                     "level": 0,
-                }
-            ]
-        },
-    }
-
-    plugin = config.get("plugin")
-    if plugin and plugin["name"] == "v2ray-plugin":
-        stream = {
-            "network": "ws",
-            "wsSettings": {
-                "path": plugin["path"],
-                "headers": {"Host": plugin["host"]},
+                }]
             },
-        }
-        if plugin["tls"]:
-            stream["security"] = "tls"
-            stream["tlsSettings"] = {"serverName": plugin["host"]}
-        outbound["streamSettings"] = stream
-
-    return {
-        "log": {"loglevel": "error"},
-        "inbounds": [
-            {
-                "listen": "127.0.0.1",
-                "port": local_port,
-                "protocol": "http",
-                "settings": {},
-            }
-        ],
-        "outbounds": [outbound],
+            "streamSettings": {
+                "network": "ws",
+                "security": "tls",
+                "tlsSettings": {
+                    "serverName": config["plugin"]["host"],   # SNI = original host
+                },
+                "wsSettings": {
+                    "path": config["plugin"]["path"],
+                    "headers": {"Host": config["plugin"]["host"]},
+                },
+            },
+        }],
     }
+
+
+# ============================================================
+# Output URI rebuild (swap server → CLOUDFLARE_IP)
+# ============================================================
+
+def _rebuild_output_uri(config):
+    """Rebuild ss:// URI preserving everything but server host."""
+    orig = config["original"]
+    raw = orig[5:]
+
+    tag_suffix = ""
+    if "#" in raw:
+        raw, tag_part = raw.split("#", 1)
+        tag_suffix = "#" + tag_part
+
+    query_suffix = ""
+    if "?" in raw:
+        raw, query_part = raw.split("?", 1)
+        query_suffix = "?" + query_part
+
+    if "@" not in raw:
+        return orig  # shouldn't happen
+
+    userinfo, _old_server = raw.rsplit("@", 1)
+    return f"ss://{userinfo}@{CLOUDFLARE_IP}:{config['port']}{query_suffix}{tag_suffix}"
 
 
 # ============================================================
@@ -510,7 +611,7 @@ def test_config(index, config):
 
     base_result = {
         "index": index,
-        "line": config["original"],
+        "line": _rebuild_output_uri(config),   # ← output uses Cloudflare IP
         "protocol": config.get("protocol", "?"),
         "server": config.get("server", "?"),
     }
@@ -583,7 +684,8 @@ def test_config(index, config):
                     "latencies": latencies, "reason": reason}
 
         final_latency = int(median(latencies))
-        print(f"[ONLINE] {final_latency} ms | {config.get('server','?')}:{config.get('port')}")
+        print(f"[ONLINE] {final_latency} ms | {config['server']} → {CLOUDFLARE_IP}:443 "
+              f"| host={config['plugin']['host']}")
         return {**base_result, "ok": True, "latency": final_latency,
                 "latencies": latencies, "reason": "ok"}
 
@@ -618,7 +720,9 @@ def test_config(index, config):
 
 def main():
     print("\n==============================")
-    print(" SHADOWSOCKS (SS) CHECKER")
+    print(" SS CHECKER — STRICT MODE")
+    print(" ss + v2ray-plugin + WS + TLS + 443")
+    print(f" Cloudflare IP : {CLOUDFLARE_IP}")
     print("==============================\n")
 
     if not os.path.isfile(XRAY):
@@ -643,23 +747,37 @@ def main():
         config = parse_config(line)
         if config:
             configs.append(config)
-            tag = "ss+v2ray-plugin" if config["plugin"] else "ss-plain"
-            parse_stats[tag] += 1
+            parse_stats["accepted (ss+v2ray-plugin+ws+tls+443)"] += 1
         else:
-            parse_stats["dropped (non-SS or unsupported)"] += 1
+            parse_stats["dropped (not matching filter)"] += 1
 
     print(f"\n--- Parse stage ---")
     for key, count in parse_stats.items():
-        print(f"  {key:35s}: {count}")
+        print(f"  {key:40s}: {count}")
+
+    # Dedupe by identity (server+method+password+plugin host+path)
+    def _key(c):
+        return (c["server"], c["port"], c["method"], c["password"],
+                c["plugin"]["host"], c["plugin"]["path"])
+    seen = set()
+    unique = []
+    for c in configs:
+        k = _key(c)
+        if k not in seen:
+            seen.add(k)
+            unique.append(c)
+    dupes_removed = len(configs) - len(unique)
+    configs = unique
+    if dupes_removed:
+        print(f"  duplicates removed                       : {dupes_removed}")
 
     print(f"\nTestable configs : {len(configs)}")
     print(f"TEST_URLS        : {TEST_URLS}")
     print(f"Rounds per config: {TEST_ROUNDS}")
-    print(f"Min success      : {MIN_SUCCESS}")
     print(f"Max latency (ms) : {MAX_LATENCY_MS}")
 
     if not configs:
-        print("\nNo SS configs found.")
+        print("\nNo SS WS+TLS 443 configs found.")
         open("working.txt", "w", encoding="utf-8").close()
         return
 
@@ -714,9 +832,9 @@ def main():
     print(f"Failed            : {failed_count}")
 
     if failed_count:
-        print("\n--- Failure reasons (overall) ---")
+        print("\n--- Failure reasons ---")
         overall = Counter(r.get("reason", "unknown") for r in failed_results)
-        for reason, count in overall.most_common(15):
+        for reason, count in overall.most_common(10):
             pct = 100 * count / failed_count
             print(f"  {count:5d} ({pct:5.1f}%)  {reason}")
 
