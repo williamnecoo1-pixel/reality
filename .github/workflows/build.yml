@@ -25,10 +25,17 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Build
+      # الخطوة القديمة (VLESS/VMess/Trojan)
+      - name: Build Main (VLESS/Trojan)
         env:
           CF_IPS: '104.18.37.127,172.64.80.1,104.16.0.1'
         run: node scripts/build.mjs
+
+      # الخطوة الجديدة (SS + WS)
+      - name: Build SS-WS
+        env:
+          CF_IPS: '104.18.37.127,172.64.80.1,104.16.0.1'
+        run: node scripts/ss-ws.mjs
 
       - name: Commit
         run: |
