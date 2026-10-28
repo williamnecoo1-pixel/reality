@@ -25,7 +25,6 @@ jobs:
         with:
           node-version: '20'
 
-      # هنا كيخدم السكريبت اللي عندك فـ build.mjs
       - name: Build SS-WS Configs
         env:
           CF_IPS: '104.18.37.127,172.64.80.1,104.16.0.1'
@@ -37,7 +36,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add dist
           git diff --staged --quiet || git commit -m "chore: refresh cf configs $(date -u +%FT%TZ)"
-          git push
+          git push origin main --force
 
       - uses: actions/upload-artifact@v4
         with:
