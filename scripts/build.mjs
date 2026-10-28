@@ -9,13 +9,7 @@ const CF_IPS = (process.env.CF_IPS || '104.18.37.127,172.64.80.1,104.16.0.1')
   .split(',').map((s) => s.trim()).filter(Boolean);
 
 const SOURCES = [
-  'https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt',
-  'https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt',
-  'https://raw.githubusercontent.com/mfuu/v2ray/master/v2ray',
-  'https://raw.githubusercontent.com/ALIILAPRO/v2rayNG-Config/main/sub.txt',
-  'https://raw.githubusercontent.com/ts-sf/fly/main/v2',
-  'https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2',
-  'https://raw.githubusercontent.com/mahsanet/MahsaFreeConfig/main/mci/sub_1.txt',
+  'https://github.com/0xRadikal/Free-v2ray-Configs/raw/refs/heads/main/all/configs.txt',
 ];
 
 const ALLOWED_NET = new Set(['ws', 'grpc', 'httpupgrade', 'xhttp']);
