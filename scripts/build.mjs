@@ -1,30 +1,29 @@
-// ss-ws.mjs — يستخرج Shadowsocks + v2ray-plugin (TLS) ويختبر الاتصال
+// ss-ws.mjs — يستخرج Shadowsocks + v2ray-plugin (TLS) ويطبق Domain Fronting مع CF
 import { promises as fs } from 'node:fs';
 import net from 'node:net';
 
 const env = (k, d) => (process.env[k] || d).split(',').map(s => s.trim()).filter(Boolean);
 
-// المصادر (يمكنك زيادة مصادر أخرى هنا)
+// المصادر
 const SOURCES = env('SOURCES', [
   'https://github.com/0xRadikal/Free-v2ray-Configs/raw/refs/heads/main/all/configs.txt',
   'https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt',
   'https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/Eternity'
 ].join(','));
 
+const CF_IPS = env('CF_IPS', '104.18.37.127,172.64.80.1,104.16.0.1');
 const OUT = 'dist', MAX_OUT = 250, CONC = 40, T = 4000;
 
 function parseSS(line) {
   const raw = (line || '').trim();
   if (!raw.startsWith('ss://') || raw.length > 2000) return null;
   
-  // فصل الرابط عن الاسم (Remark)
   const parts = raw.split('#');
   const cleanLink = parts[0];
   const remark = parts[1] ? decodeURIComponent(parts[1]) : '';
 
-  const body = cleanLink.slice(5); // إزالة ss://
+  const body = cleanLink.slice(5);
   
-  // فحص إذا كان التنسيق SIP002 (فيه @)
   if (!body.includes('@')) return null; 
 
   const atIdx = body.indexOf('@');
@@ -32,7 +31,7 @@ function parseSS(line) {
   const rest = body.slice(atIdx + 1);
   
   const qIdx = rest.indexOf('?');
-  if (qIdx === -1) return null; // ما كاينش plugin
+  if (qIdx === -1) return null;
 
   const hostPort = rest.slice(0, qIdx);
   const query = rest.slice(qIdx + 1);
@@ -40,23 +39,21 @@ function parseSS(line) {
   const [host, portStr] = hostPort.split(':');
   const port = parseInt(portStr, 10);
   
-  if (port !== 443) return null; // نبقاو غير على 443
+  if (port !== 443) return null; 
 
   const params = new URLSearchParams(query);
   const plugin = params.get('plugin') || '';
   
-  // خاصنا v2ray-plugin و tls
   if (!plugin.toLowerCase().includes('v2ray-plugin')) return null;
   if (!plugin.toLowerCase().includes('tls')) return null;
 
-  // استخراج host من الـ plugin (اختياري للاسم فقط)
   const pluginParts = plugin.split(';');
   const hostOpt = pluginParts.find(p => p.startsWith('host='));
   const realHost = hostOpt ? hostOpt.replace('host=', '') : host;
 
   return {
     raw: cleanLink,
-    host,
+    originalHost: host,
     port,
     realHost,
     userinfo,
@@ -82,9 +79,9 @@ async function pool(items, n, fn) {
   return out;
 }
 
-function rebuildLink(e) {
-  // كنعاودو نبنيو الرابط باش يكون نقي
-  return `ss://${e.userinfo}@${e.host}:${e.port}?plugin=${encodeURIComponent(e.plugin)}#${encodeURIComponent(e.remark)}`;
+function rebuildLink(e, cfIp) {
+  // كنعاودو نبنيو الرابط بالـ CF IP
+  return `ss://${e.userinfo}@${cfIp}:${e.port}?plugin=${encodeURIComponent(e.plugin)}#${encodeURIComponent(e.remark)}`;
 }
 
 async function getText(url) {
@@ -101,7 +98,6 @@ async function main() {
 
   const lines = texts.flatMap(t => {
     const s = t.trim();
-    // بعض السورسات كيكونو Base64
     let body = s;
     if (!s.includes('://')) {
       try { body = Buffer.from(s, 'base64').toString('utf8'); } catch(e) {}
@@ -112,7 +108,7 @@ async function main() {
   const seen = new Set(), uniq = [];
   for (const l of lines) {
     const e = parseSS(l); if (!e) continue;
-    const k = `${e.userinfo}|${e.host}|${e.port}|${e.plugin}`;
+    const k = `${e.userinfo}|${e.originalHost}|${e.port}|${e.plugin}`;
     if (seen.has(k)) continue; 
     seen.add(k); 
     uniq.push(e);
@@ -122,22 +118,26 @@ async function main() {
   const list = uniq.slice(0, 1500); 
   let n = 0;
   
-  // فحص الـ TCP
+  // فحص الـ TCP ضد الـ IP ديال Cloudflare
   const live = (await pool(list, CONC, async e => {
-    const ok = await tcpAlive(e.host, e.port);
+    // كنختارو IP ديال CF بشكل عشوائي
+    const cfIp = CF_IPS[Math.floor(Math.random() * CF_IPS.length)];
+    
+    // كنفحصو واش الـ CF IP مفتوح
+    const ok = await tcpAlive(cfIp, e.port);
+    
     if (++n % 200 === 0) console.log(`    فحص ${n}/${list.length}`);
-    return ok ? e : null;
+    return ok ? { ...e, cfIp } : null;
   })).filter(Boolean).slice(0, MAX_OUT);
   
-  console.log(`[+] حي (TCP Open): ${live.length}`);
+  console.log(`[+] حي (متصل بـ CF): ${live.length}`);
 
-  // بناء الروابط النهائية
-  const finalLinks = live.map(e => rebuildLink(e));
-
-  if (finalLinks.length === 0) {
-    console.log('⚠️ ما لقيناش حتى واحد حي. (هادي نتيجة عادية حيت SS+WS نادرين فـ GitHub)');
+  if (live.length === 0) {
+    console.log('⚠️ ما لقيناش حتى واحد حي كيدوز من CF. (هادي نتيجة عادية حيت SS+WS نادرين فـ GitHub)');
     return;
   }
+
+  const finalLinks = live.map(e => rebuildLink(e, e.cfIp));
 
   await fs.writeFile(`${OUT}/ss-ws.txt`, finalLinks.join('\n') + '\n');
   console.log('[✓] dist/ss-ws.txt تم إنشاؤه بنجاح');
