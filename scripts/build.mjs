@@ -1,443 +1,403 @@
-import { promises as fs } from 'node:fs';
-import { spawn, execFile } from 'node:child_process';
-import net from 'node:net';
-import { promisify } from 'node:util';
+import concurrent.futures
+import json
+import os
+import socket
+import subprocess
+import tempfile
+import time
+import base64
+from statistics import median
+from urllib.parse import parse_qs, unquote, urlparse
+from collections import Counter
 
-const execFileAsync = promisify(execFile);
+import requests
 
-const env = (key, fallback) =>
-  (process.env[key] || fallback)
-    .split(',')
-    .map(value => value.trim())
-    .filter(Boolean);
 
-const CF_IPS = env(
-  'CF_IPS',
-  '104.18.37.127,x.com,www.getlucky.com,104.18.36.146,172.64.150.129,172.64.151.110,canary-proxsee-cf.pscp.tv,game01.circus.nl,104.18.41.245,185.199.108.153,api.server.io,104.16.132.229'
-);
+SOURCE_URLS = [
+    "https://github.com/Mohamedhnini-a/Neverstops/raw/refs/heads/main/sub.txt",
+    "https://github.com/Mohamedhnini-a/testeur/raw/refs/heads/main/working_configs.txt",
+]
+XRAY = "./xray/xray"
 
-const SOURCES = env(
-  'SOURCES',
-  [
-    'https://github.com/0xRadikal/Free-v2ray-Configs/raw/refs/heads/main/all/configs.txt',
-    'https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt',
-    'https://raw.githubusercontent.com/MustafaBaqer/VestraNet-Nodes/refs/heads/main/subscriptions/mix-normal.txt',
-    'https://raw.githubusercontent.com/ByeWhiteLists/ByeWhiteLists2/refs/heads/main/ByeWhiteLists2.txt',
-    'https://github.com/YawStar/Proxy-Hunter/raw/refs/heads/main/configs/proxy_configs.txt',
-    'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/tls.txt',
-    'https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/all.txt',
-    'https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/Eternity'
-  ].join(',')
-);
+TEST_URLS = [
+    "http://cp.cloudflare.com/generate_204",
+    "http://www.apple.com/library/test/success.html",
+    "http://www.gstatic.com/generate_204",
+]
 
-const OUT = 'dist';
-const MAX_OUT = 200;
-const MAX_TEST = Number(process.env.MAX_TEST || 1000);
-const CONC = 8;
-const TIMEOUT = 9000;
-const TEST_URL = 'https://www.google.com/generate_204';
+TIMEOUT = 10
+MAX_WORKERS = 40
+BASE_PORT = 20000
+TEST_ROUNDS = 1
+MIN_SUCCESS = 1
+MAX_LATENCY_MS = 10000
 
-let tested = 0;
-let nextPort = 21000;
+_SESSION = requests.Session()
+_SESSION.trust_env = False
 
-function decodeBase64(value) {
-  try {
-    const normalized = value
-      .replace(/-/g, '+')
-      .replace(/_/g, '/');
 
-    return Buffer.from(normalized, 'base64').toString('utf8');
-  } catch {
-    return '';
-  }
-}
+def test_once(proxies):
+    last_error = None
+    for url in TEST_URLS:
+        try:
+            start = time.perf_counter()
+            response = _SESSION.get(url, proxies=proxies, timeout=TIMEOUT, allow_redirects=False)
+            elapsed = (time.perf_counter() - start) * 1000
 
-function decodeCredentials(rawUserinfo) {
-  let value;
+            if response.status_code in (200, 204):
+                return round(elapsed), None
 
-  try {
-    value = decodeURIComponent(rawUserinfo);
-  } catch {
-    value = rawUserinfo;
-  }
+            last_error = f"http_{response.status_code}"
+            if 500 <= response.status_code < 600:
+                continue
+            else:
+                return None, last_error
 
-  if (value.includes(':')) {
-    const index = value.indexOf(':');
+        except requests.exceptions.Timeout:
+            last_error = "timeout"
+        except requests.exceptions.ProxyError:
+            return None, "proxy_error"
+        except requests.exceptions.SSLError:
+            last_error = "ssl_error"
+        except requests.exceptions.ConnectionError:
+            last_error = "conn_error"
+        except Exception as e:
+            last_error = type(e).__name__
+
+    return None, last_error
+
+
+def download_configs():
+    configs = []
+    for source_url in SOURCE_URLS:
+        try:
+            print(f"Downloading: {source_url}")
+            response = requests.get(source_url, timeout=20)
+            response.raise_for_status()
+            source_configs = [line.strip() for line in response.text.splitlines() if line.strip()]
+            print(f"  → {len(source_configs)} lines")
+            configs.extend(source_configs)
+        except requests.RequestException as error:
+            print(f"  → FAILED: {error}")
+    configs = list(dict.fromkeys(configs))
+    return configs
+
+
+def parse_ss(line):
+    """تحليل روابط Shadowsocks SIP002"""
+    try:
+        if not line.startswith("ss://"):
+            return None
+
+        line_clean = line.split("#")[0]
+        body = line_clean[5:]
+
+        # SIP002: userinfo@host:port?plugin=...
+        if "@" not in body:
+            return None
+
+        userinfo, rest = body.split("@", 1)
+        
+        # فك تشفير userinfo (method:password)
+        try:
+            # بعض الروابط كتكون base64
+            userinfo_dec = base64.b64decode(userinfo + "=" * (-len(userinfo) % 4)).decode('utf-8')
+            if ":" not in userinfo_dec:
+                raise ValueError
+        except Exception:
+            userinfo_dec = unquote(userinfo)
+            
+        if ":" not in userinfo_dec:
+            return None
+        method, password = userinfo_dec.split(":", 1)
+
+        host_port, *params = rest.split("?", 1)
+        if ":" not in host_port:
+            return None
+        
+        server, port_str = host_port.rsplit(":", 1)
+        port = int(port_str)
+        
+        if port != 443:
+            return None
+            
+        if not params:
+            return None
+        
+        query = parse_qs(params[0])
+        plugin_list = query.get("plugin", [])
+        if not plugin_list:
+            return None
+        
+        plugin = plugin_list[0]
+        
+        # الفلترة: خاصنا v2ray-plugin أو xray-plugin و tls
+        if not any(x in plugin for x in ["v2ray-plugin", "xray-plugin"]):
+            return None
+        if "tls" not in plugin.lower():
+            return None
+            
+        # استخراج host و path من الـ plugin
+        sni = server
+        path = "/"
+        for opt in plugin.split(";"):
+            if opt.startswith("host="):
+                sni = opt.split("=", 1)[1]
+            elif opt.startswith("path="):
+                path = opt.split("=", 1)[1]
+
+        return {
+            "protocol": "ss",
+            "server": server,
+            "port": 443,
+            "method": method,
+            "password": password,
+            "host": sni,
+            "sni": sni,
+            "path": path,
+            "original": line,
+        }
+    except Exception:
+        return None
+
+
+def parse_config(line):
+    if line.startswith("ss://"):
+        return parse_ss(line)
+    return None # هنا حيدنا VLESS/VMess/Trojan حيت بغينا SS فقط
+
+
+def make_xray_config(config, local_port):
+    stream_settings = {
+        "network": "ws",
+        "security": "tls",
+        "tlsSettings": {
+            "serverName": config["sni"],
+        },
+        "wsSettings": {
+            "path": config["path"],
+            "headers": {"Host": config["host"]},
+        },
+    }
+
+    if config["protocol"] == "ss":
+        outbound = {
+            "protocol": "shadowsocks",
+            "settings": {
+                "servers": [
+                    {
+                        "address": config["server"],
+                        "port": 443,
+                        "method": config["method"],
+                        "password": config["password"],
+                    }
+                ]
+            },
+            "streamSettings": stream_settings,
+        }
+    else:
+        return None
+
     return {
-      method: value.slice(0, index),
-      password: value.slice(index + 1)
-    };
-  }
-
-  const decoded = decodeBase64(value);
-  const index = decoded.indexOf(':');
-
-  if (index <= 0) return null;
-
-  return {
-    method: decoded.slice(0, index),
-    password: decoded.slice(index + 1)
-  };
-}
-
-function parseSS(line) {
-  const raw = (line || '').trim();
-
-  if (!raw.startsWith('ss://') || raw.length > 2000) {
-    return null;
-  }
-
-  let url;
-
-  try {
-    url = new URL(raw);
-  } catch {
-    return null;
-  }
-
-  if (url.protocol !== 'ss:' || url.port !== '443') {
-    return null;
-  }
-
-  const plugin = url.searchParams.get('plugin') || '';
-  if (!plugin) return null;
-
-  const parts = plugin.split(';');
-  const pluginName = parts.shift().trim().toLowerCase();
-  const options = parts.filter(Boolean);
-
-  const hasTLS = options.some(option =>
-    option.toLowerCase() === 'tls'
-  );
-
-  const mode = options.find(option =>
-    option.toLowerCase().startsWith('mode=')
-  );
-
-  // v2ray-plugin uses WebSocket by default.
-  // Do not mistake QUIC or another transport for WebSocket.
-  if (!hasTLS) return null;
-
-  if (
-    mode &&
-    !['mode=websocket', 'mode=ws'].includes(mode.toLowerCase())
-  ) {
-    return null;
-  }
-
-  const hostOption = options.find(option =>
-    option.toLowerCase().startsWith('host=')
-  );
-
-  const sni = hostOption
-    ? hostOption.slice(hostOption.indexOf('=') + 1).trim()
-    : url.hostname;
-
-  if (!sni || !url.hostname) return null;
-
-  const credentials = decodeCredentials(url.username);
-
-  if (!credentials?.method || !credentials.password) {
-    return null;
-  }
-
-  // Only test plugins actually installed by this workflow.
-  // Other plugin implementations must not be reported as tested.
-  if (pluginName !== 'v2ray-plugin') {
-    return null;
-  }
-
-  return {
-    raw,
-    url,
-    originalHost: url.hostname,
-    method: credentials.method,
-    password: credentials.password,
-    plugin,
-    pluginName,
-    options,
-    sni,
-    remark: decodeURIComponentSafe(url.hash.slice(1)) || sni
-  };
-}
-
-function decodeURIComponentSafe(value) {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
-
-function chooseRandomIp() {
-  return CF_IPS[Math.floor(Math.random() * CF_IPS.length)];
-}
-
-function rebuildLink(entry, server, delay) {
-  const url = new URL(entry.raw);
-
-  url.hostname = server;
-  url.port = '443';
-  url.hash = encodeURIComponent(`${entry.remark} | ${delay}ms`);
-
-  return url.toString();
-}
-
-function waitForPort(port, child, timeout = 4000) {
-  return new Promise(resolve => {
-    const started = Date.now();
-
-    function attempt() {
-      if (child.exitCode !== null) {
-        resolve(false);
-        return;
-      }
-
-      const socket = net.connect({
-        host: '127.0.0.1',
-        port
-      });
-
-      let finished = false;
-
-      const done = result => {
-        if (finished) return;
-        finished = true;
-        socket.destroy();
-
-        if (result) {
-          resolve(true);
-        } else if (Date.now() - started >= timeout) {
-          resolve(false);
-        } else {
-          setTimeout(attempt, 100);
-        }
-      };
-
-      socket.setTimeout(300);
-      socket.once('connect', () => done(true));
-      socket.once('error', () => done(false));
-      socket.once('timeout', () => done(false));
+        "log": {"loglevel": "error"},
+        "inbounds": [
+            {
+                "listen": "127.0.0.1",
+                "port": local_port,
+                "protocol": "http",
+                "settings": {},
+            }
+        ],
+        "outbounds": [outbound],
     }
 
-    attempt();
-  });
-}
 
-async function realTest(entry, server) {
-  const port = nextPort++;
-  const pluginOptions = entry.options.join(';');
+def validate_xray_config(config_file):
+    try:
+        result = subprocess.run(
+            [XRAY, "run", "-test", "-c", config_file],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            msg = (result.stderr or result.stdout or "").strip()
+            lines = [ln for ln in msg.splitlines() if ln.strip()]
+            return False, " | ".join(lines[-2:])[:250]
+        return True, None
+    except subprocess.TimeoutExpired:
+        return False, "xray_test_timeout"
+    except Exception as e:
+        return False, f"{type(e).__name__}: {str(e)[:150]}"
 
-  const args = [
-    '-s', server,
-    '-p', '443',
-    '-m', entry.method,
-    '-k', entry.password,
-    '-b', '127.0.0.1',
-    '-l', String(port),
-    '-t', '8',
-    '--plugin', 'v2ray-plugin',
-    '--plugin-opts', pluginOptions
-  ];
 
-  const child = spawn('ss-local', args, {
-    stdio: 'ignore'
-  });
+def _read_log(log_file, max_lines=3, max_chars=250):
+    try:
+        with open(log_file, "r", encoding="utf-8", errors="ignore") as lf:
+            lines = [ln.strip() for ln in lf.read().splitlines() if ln.strip()]
+            return " | ".join(lines[:max_lines])[:max_chars]
+    except Exception:
+        return ""
 
-  try {
-    const ready = await waitForPort(port, child);
 
-    if (!ready) return null;
+def test_config(index, config):
+    local_port = BASE_PORT + index
+    config_file = None
+    log_file = None
+    process = None
+    latencies = []
+    last_err = None
 
-    const start = Date.now();
-
-    const { stdout } = await execFileAsync(
-      'curl',
-      [
-        '--silent',
-        '--show-error',
-        '--output', '/dev/null',
-        '--write-out', '%{http_code}',
-        '--connect-timeout', '4',
-        '--max-time', '8',
-        '--socks5-hostname', `127.0.0.1:${port}`,
-        TEST_URL
-      ],
-      {
-        timeout: TIMEOUT + 1000,
-        maxBuffer: 1024 * 1024
-      }
-    );
-
-    const delay = Date.now() - start;
-    const status = Number(stdout.trim());
-
-    if (status < 200 || status >= 400) return null;
-
-    return delay;
-  } catch {
-    return null;
-  } finally {
-    child.kill('SIGTERM');
-
-    setTimeout(() => {
-      if (child.exitCode === null) {
-        child.kill('SIGKILL');
-      }
-    }, 300).unref();
-  }
-}
-
-async function pool(items, concurrency, fn) {
-  const results = new Array(items.length);
-  let index = 0;
-
-  await Promise.all(
-    Array.from(
-      { length: Math.min(concurrency, items.length) },
-      async () => {
-        while (true) {
-          const current = index++;
-
-          if (current >= items.length) return;
-
-          try {
-            results[current] = await fn(items[current]);
-          } catch {
-            results[current] = null;
-          }
-        }
-      }
-    )
-  );
-
-  return results;
-}
-
-async function getText(url) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000);
-
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        'user-agent': 'NeverStops-Config-Collector/1.0'
-      }
-    });
-
-    if (!response.ok) {
-      console.log(`[!] Source HTTP ${response.status}: ${url}`);
-      return null;
+    base_result = {
+        "index": index,
+        "line": config["original"],
+        "protocol": config.get("protocol", "?"),
+        "server": config.get("server", "?"),
     }
 
-    return await response.text();
-  } catch {
-    console.log(`[!] Source failed: ${url}`);
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+    try:
+        xray_config = make_xray_config(config, local_port)
+        if not xray_config:
+            return {**base_result, "ok": False, "latency": None, "latencies": [], "reason": "make_config_failed"}
 
-function expandText(text) {
-  const trimmed = text.trim();
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as f:
+            json.dump(xray_config, f, ensure_ascii=False)
+            config_file = f.name
 
-  if (!trimmed) return [];
+        is_valid, err = validate_xray_config(config_file)
+        if not is_valid:
+            return {**base_result, "ok": False, "latency": None, "latencies": [], "reason": f"invalid_config: {err[:120]}"}
 
-  // Decode a subscription only when it looks like Base64,
-  // rather than decoding ordinary plain-text configurations.
-  if (!trimmed.includes('://') && /^[A-Za-z0-9+/_=-]+$/.test(trimmed)) {
-    const decoded = decodeBase64(trimmed);
+        log_file = tempfile.NamedTemporaryFile(suffix=".log", delete=False).name
+        log_handle = open(log_file, "w")
+        try:
+            process = subprocess.Popen([XRAY, "run", "-c", config_file], stdout=subprocess.DEVNULL, stderr=log_handle)
+        finally:
+            log_handle.close()
 
-    if (decoded.includes('ss://')) {
-      return decoded.split(/\r?\n/);
-    }
-  }
+        started = False
+        for _ in range(20):
+            if process.poll() is not None:
+                break
+            try:
+                sock = socket.create_connection(("127.0.0.1", local_port), timeout=0.5)
+                sock.close()
+                started = True
+                break
+            except OSError:
+                time.sleep(0.1)
 
-  return trimmed.split(/\r?\n/);
-}
+        if not started:
+            exit_code = process.poll()
+            time.sleep(0.2)
+            xray_err = _read_log(log_file)
+            detail = f"exit={exit_code}|err={xray_err or 'empty'}"
+            reason = "xray_died" if exit_code is not None else "xray_no_port"
+            return {**base_result, "ok": False, "latency": None, "latencies": [], "reason": f"{reason}({detail})"}
 
-async function main() {
-  await fs.mkdir(OUT, { recursive: true });
+        proxies = {"http": f"http://127.0.0.1:{local_port}", "https": f"http://127.0.0.1:{local_port}"}
 
-  console.log(`[+] Sources: ${SOURCES.length}`);
-  console.log(`[+] Replacement addresses: ${CF_IPS.length}`);
+        for round_number in range(TEST_ROUNDS):
+            latency, err = test_once(proxies)
+            if latency is not None:
+                latencies.append(latency)
+            else:
+                last_err = err
+            if round_number < TEST_ROUNDS - 1:
+                time.sleep(0.15)
 
-  const texts = (await Promise.all(SOURCES.map(getText)))
-    .filter(Boolean);
+        success_count = len(latencies)
+        if success_count < MIN_SUCCESS:
+            reason = last_err or "request_failed"
+            return {**base_result, "ok": False, "latency": None, "latencies": latencies, "reason": reason}
 
-  console.log(`[+] Sources downloaded: ${texts.length}/${SOURCES.length}`);
+        final_latency = int(median(latencies))
+        return {**base_result, "ok": True, "latency": final_latency, "latencies": latencies, "reason": "ok"}
 
-  if (!texts.length) {
-    throw new Error('No source could be downloaded');
-  }
+    except Exception as error:
+        err_type = type(error).__name__
+        return {**base_result, "ok": False, "latency": None, "latencies": latencies, "reason": err_type}
 
-  const lines = texts.flatMap(expandText);
-  const unique = [];
-  const seen = new Set();
+    finally:
+        if process:
+            try:
+                process.terminate()
+                process.wait(timeout=1)
+            except Exception:
+                try:
+                    process.kill()
+                    process.wait(timeout=1)
+                except Exception:
+                    pass
+        for path in (config_file, log_file):
+            if path:
+                try: os.remove(path)
+                except Exception: pass
 
-  for (const line of lines) {
-    const entry = parseSS(line);
 
-    if (!entry) continue;
+def main():
+    print("\n==============================")
+    print(" SHADOWSOCKS (SS) + WS + TLS CHECKER")
+    print("==============================\n")
 
-    const key = [
-      entry.method,
-      entry.password,
-      entry.originalHost,
-      entry.plugin
-    ].join('|');
+    if not os.path.isfile(XRAY):
+        print(f"ERROR: Xray binary not found at '{XRAY}'")
+        return
 
-    if (seen.has(key)) continue;
+    print("Downloading configs...")
+    lines = download_configs()
+    print(f"Downloaded: {len(lines)} lines")
 
-    seen.add(key);
-    unique.push(entry);
-  }
+    configs = []
+    for line in lines:
+        config = parse_config(line)
+        if config:
+            configs.append(config)
 
-  console.log(`[+] Unique compatible SS+WS+TLS+443: ${unique.length}`);
+    print(f"\nTestable SS+WS+TLS configs : {len(configs)}")
 
-  const candidates = unique.slice(0, MAX_TEST);
-  const live = [];
+    if not configs:
+        print("\nNo SS WS TLS 443 configs found.")
+        open("working.txt", "w", encoding="utf-8").close()
+        return
 
-  await pool(candidates, CONC, async entry => {
-    const server = chooseRandomIp();
-    const delay = await realTest(entry, server);
+    tasks = list(enumerate(configs, start=1))
+    results = []
 
-    const count = ++tested;
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        iterator = iter(tasks)
+        pending = set()
 
-    if (count % 25 === 0 || count === candidates.length) {
-      console.log(`[+] Tested ${count}/${candidates.length}; working: ${live.length}`);
-    }
+        for _ in range(MAX_WORKERS):
+            try: pending.add(executor.submit(test_config, *next(iterator)))
+            except StopIteration: break
 
-    if (delay !== null) {
-      live.push({
-        entry,
-        server,
-        delay
-      });
-    }
-  });
+        while pending:
+            done, pending = concurrent.futures.wait(pending, return_when=concurrent.futures.FIRST_COMPLETED)
+            for future in done:
+                try: results.append(future.result())
+                except Exception as e: print(f"[FAILED] Worker error: {str(e)[:100]}")
+                try: pending.add(executor.submit(test_config, *next(iterator)))
+                except StopIteration: pass
 
-  live.sort((a, b) => a.delay - b.delay);
+    working_results = [r for r in results if r["ok"]]
+    working_results.sort(key=lambda x: (x["latency"], x["index"]))
+    fast_results = [r for r in working_results if r["latency"] <= MAX_LATENCY_MS]
 
-  const finalLinks = live
-    .slice(0, MAX_OUT)
-    .map(item =>
-      rebuildLink(item.entry, item.server, item.delay)
-    );
+    with open("working.txt", "w", encoding="utf-8") as f:
+        for r in fast_results:
+            f.write(r["line"] + "\n")
 
-  await fs.writeFile(
-    `${OUT}/ss-ws.txt`,
-    finalLinks.length ? `${finalLinks.join('\n')}\n` : '',
-    'utf8'
-  );
+    print("\n==============================")
+    print(" CHECK FINISHED")
+    print("==============================")
+    print(f"Working (fast)    : {len(fast_results)}")
 
-  console.log(`[+] Successful real HTTP tests: ${live.length}`);
-  console.log(`[✓] Wrote ${finalLinks.length} links to ${OUT}/ss-ws.txt`);
-}
+    print("\nFastest configs:")
+    for pos, r in enumerate(fast_results[:10], start=1):
+        print(f"{pos:02d}. {r['latency']} ms | {r.get('protocol','?')} | {r.get('server','?')}")
 
-main().catch(error => {
-  console.error('FAILED:', error);
-  process.exitCode = 1;
-});
+    print("\nOutput: working.txt")
+
+if __name__ == "__main__":
+    main()
