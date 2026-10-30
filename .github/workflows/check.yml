@@ -1,9 +1,9 @@
-name: Check and Update Working SS Configs
+name: Check and Update Working Configs
 
 on:
   workflow_dispatch:
   schedule:
-    # Every 6 hours (UTC)
+    # كل 6 سوايع - UTC
     - cron: "0 */6 * * *"
 
 permissions:
@@ -12,14 +12,15 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 500
+    # 360 هو أقصى حد كيسمح بيه GitHub Actions (6 سوايع)
+    timeout-minutes: 360 
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4 # ✅ إصدار صحيح
 
       - name: Setup Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v5 # ✅ إصدار صحيح
         with:
           python-version: "3.12"
 
@@ -30,17 +31,19 @@ jobs:
 
       - name: Download Xray
         run: |
-          XRAY_VERSION="v26.7.28"
+          # ملاحظة: الإصدار v26.7.28 مشكوك فيه. هادا إصدار معروف ومستقر:
+          XRAY_VERSION="v1.8.24"
           wget -q "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip" -O xray.zip
           unzip -q xray.zip -d xray
           chmod +x xray/xray
           ./xray/xray version
 
       - name: Check configs
-        run: python checker.py
+        run: |
+          # ✅ زدنا -u باش تشوف اللوغات دغيا
+          python -u checker.py
 
-      - name: Prepare subscription file
-        if: always()
+      - name: Prepare working_configs.txt
         run: |
           if [ -f working.txt ]; then
             mv working.txt working_configs.txt
@@ -49,10 +52,9 @@ jobs:
           fi
 
       - name: Show result
-        if: always()
         run: |
           echo "=============================="
-          echo " WORKING SS CONFIGS"
+          echo " WORKING CONFIGS"
           echo "=============================="
           echo "Count:"
           wc -l working_configs.txt
@@ -61,7 +63,6 @@ jobs:
           head -n 10 working_configs.txt
 
       - name: Update repository
-        if: success()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -69,13 +70,12 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes in working_configs.txt"
           else
-            git commit -m "Update working SS configs"
+            git commit -m "Update working configs"
             git push
           fi
 
       - name: Upload working configs
-        if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4 # ✅ إصدار صحيح
         with:
           name: working-configs
           path: working_configs.txt
