@@ -11,15 +11,13 @@ from urllib.parse import parse_qs, unquote, urlparse
 import requests
 
 SOURCE_URLS = [
-    "https://raw.githubusercontent.com/williamnecoo1-pixel/ss/refs/heads/main/sub.txt",
+    "https://github.com/williamnecoo1-pixel/ss/raw/refs/heads/main/sub.txt",
 ]
 XRAY = "./xray/xray"
 
 TEST_URLS = [
-    
-    "https://connectivitycheck.gstatic.com/generate_204",  # Google
-    "http://www.apple.com/generate_204",                   # Apple
-    "https://www.google.com/generate_204",  
+    "http://cp.cloudflare.com/generate_204",
+    "http://www.gstatic.com/generate_204",
 ]
 
 TIMEOUT = 5
