@@ -397,7 +397,9 @@ def make_xray_config(config, local_port):
 
     return {
         "log": {
-            "loglevel": "warning"
+    "loglevel": "debug",
+    "error": "/dev/stderr",
+    "access": "/dev/stdout"
         },
 
         "inbounds": [{
@@ -456,7 +458,7 @@ def test_config(index, config):
 
             process = subprocess.Popen(
                 [XRAY, "run", "-c", config_file],
-                stdout=subprocess.DEVNULL,
+                stdout=log_handle,
                 stderr=log_handle,
                 start_new_session=True,
             )
