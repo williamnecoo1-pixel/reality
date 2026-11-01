@@ -57,7 +57,7 @@ def get_session():
 
 def test_once(proxies):
     session = get_session()
-    last_error = "unknown"
+    errors = []
 
     for url in TEST_URLS:
         try:
@@ -81,30 +81,36 @@ def test_once(proxies):
             if response.status_code in (200, 204):
                 return elapsed, None
 
-            last_error = f"http_{response.status_code}"
+            errors.append(
+                f"{url}: http_{response.status_code}"
+            )
 
         except requests.exceptions.SSLError as e:
-            last_error = f"tls_error: {str(e)[:180]}"
-
-        except requests.exceptions.ConnectTimeout:
-            last_error = "connect_timeout"
-
-        except requests.exceptions.ReadTimeout:
-            last_error = "read_timeout"
+            errors.append(
+                f"{url}: tls_error: {str(e)[:250]}"
+            )
 
         except requests.exceptions.ProxyError as e:
-            last_error = f"proxy_error: {str(e)[:180]}"
+            errors.append(
+                f"{url}: proxy_error: {str(e)[:250]}"
+            )
 
         except requests.exceptions.ConnectionError as e:
-            last_error = f"connection_error: {str(e)[:180]}"
+            errors.append(
+                f"{url}: connection_error: {str(e)[:250]}"
+            )
 
-        except requests.exceptions.Timeout:
-            last_error = "timeout"
+        except requests.exceptions.Timeout as e:
+            errors.append(
+                f"{url}: timeout: {str(e)[:150]}"
+            )
 
         except Exception as e:
-            last_error = f"{type(e).__name__}: {str(e)[:180]}"
+            errors.append(
+                f"{url}: {type(e).__name__}: {str(e)[:180]}"
+            )
 
-    return None, last_error
+    return None, " || ".join(errors)
 
 
 def test_with_retries(proxies):
