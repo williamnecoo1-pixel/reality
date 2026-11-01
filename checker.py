@@ -13,7 +13,6 @@ from urllib.parse import parse_qs, unquote, urlparse
 import requests
 import urllib3
 
-# إخفاء التحذيرات الخاصة بعدم التحقق من الشهادات
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ============================================================
@@ -32,15 +31,22 @@ TEST_URLS = [
     "https://cp.cloudflare.com/generate_204",
 ]
 
-TIMEOUT = 15           
-MAX_WORKERS = 5        
+TIMEOUT = 15
+MAX_WORKERS = 3
 BASE_PORT = 10808
 MAX_LATENCY_MS = 8000
-RETRIES = 2            
-STARTUP_TIMEOUT = 5    
-RETRY_DELAY = 1.0      
+RETRIES = 2
+STARTUP_TIMEOUT = 5
+RETRY_DELAY = 1.0
+
+DEFAULT_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
 
 _tls = threading.local()
+
 
 # ============================================================
 # SESSION
@@ -50,9 +56,10 @@ def get_session():
     if not hasattr(_tls, "session"):
         session = requests.Session()
         session.trust_env = False
-        session.verify = False 
+        session.verify = False
         _tls.session = session
     return _tls.session
+
 
 # ============================================================
 # HTTP TEST
@@ -71,7 +78,7 @@ def test_once(proxies):
                 timeout=(TIMEOUT, TIMEOUT),
                 allow_redirects=False,
                 headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "User-Agent": DEFAULT_UA,
                     "Cache-Control": "no-cache",
                 },
             )
@@ -143,6 +150,10 @@ def parse_config(line):
             b64 = line[8:].split("#", 1)[0].strip()
             b64 += "=" * ((4 - len(b64) % 4) % 4)
             config = json.loads(base64.urlsafe_b64decode(b64).decode("utf-8"))
+
+            sni = str(config.get("sni") or config.get("host") or "").strip()
+            host = str(config.get("host") or config.get("sni") or "").strip()
+
             return {
                 "protocol": "vmess",
                 "server": config.get("add", "").strip(),
@@ -152,8 +163,8 @@ def parse_config(line):
                 "scy": config.get("scy", "auto"),
                 "net": (config.get("net") or "tcp").lower(),
                 "security": (config.get("tls") or "none").lower(),
-                "sni": str(config.get("sni", "")).strip(),
-                "host": str(config.get("host", "")).strip(),
+                "sni": sni,
+                "host": host,
                 "path": str(config.get("path", "/")).strip(),
                 "alpn": str(config.get("alpn", "")).strip(),
                 "original": line,
@@ -169,6 +180,9 @@ def parse_config(line):
             protocol = parsed.scheme.lower()
             username = unquote(parsed.username or "")
 
+            host = get("host") or ""
+            sni = get("sni") or host or parsed.hostname
+
             return {
                 "protocol": protocol,
                 "server": parsed.hostname.strip(),
@@ -177,8 +191,8 @@ def parse_config(line):
                 "password": unquote(parsed.password or username),
                 "net": (get("type") or "tcp").lower(),
                 "security": (get("security") or "none").lower(),
-                "sni": get("sni") or parsed.hostname,
-                "host": get("host") or "",
+                "sni": sni,
+                "host": host,
                 "path": unquote(get("path")) or "/",
                 "alpn": get("alpn") or "",
                 "fp": get("fp") or "",
@@ -207,10 +221,9 @@ def make_xray_config(config, local_port):
     security = (config.get("security") or config.get("tls") or "none").lower()
     network = (config.get("net") or "tcp").lower()
 
-    # تنظيف SNI و Host
     sni = str(config.get("sni") or config.get("host") or server).strip()
     host = str(config.get("host") or config.get("sni") or server).strip()
-    
+
     path = config.get("path") or "/"
     if not path.startswith("/"):
         path = "/" + path
@@ -220,24 +233,28 @@ def make_xray_config(config, local_port):
         "security": security,
     }
 
-    # TLS
     if security == "tls":
         tls_settings = {
             "serverName": sni,
             "allowInsecure": True,
-            # ✅ إجبار استعمال بصمة كروم باش نتفاداو الحظر ديال Cloudflare WAF
-            "fingerprint": config.get("fp") or "chrome", 
+            "fingerprint": config.get("fp") or "chrome",
         }
-        
-        # ✅ إجبار استعمال ALPN
+
+        # ✅ ALPN: مع ws خاصو يكون http/1.1 بوحدو
         if config.get("alpn"):
-            tls_settings["alpn"] = [x.strip() for x in config["alpn"].split(",") if x.strip()]
+            alpn_list = [x.strip() for x in config["alpn"].split(",") if x.strip()]
+            if network == "ws":
+                tls_settings["alpn"] = ["http/1.1"]
+            else:
+                tls_settings["alpn"] = alpn_list
         else:
-            tls_settings["alpn"] = ["h2", "http/1.1"]
-            
+            if network == "ws":
+                tls_settings["alpn"] = ["http/1.1"]
+            else:
+                tls_settings["alpn"] = ["h2", "http/1.1"]
+
         stream["tlsSettings"] = tls_settings
 
-    # REALITY
     elif security == "reality":
         stream["realitySettings"] = {
             "serverName": sni,
@@ -247,27 +264,27 @@ def make_xray_config(config, local_port):
             "spiderX": config.get("spx") or "/",
         }
 
-    # WebSocket
+    # ✅ WebSocket: Host غير إلا كان موجود
     if network == "ws":
         ws = {
             "path": path,
         }
         if host:
-            ws["headers"] = {"Host": host}
+            ws["headers"] = {
+                "Host": host,
+                "User-Agent": DEFAULT_UA,
+            }
         stream["wsSettings"] = ws
 
-    # gRPC
     elif network == "grpc":
         stream["grpcSettings"] = {"serviceName": config.get("path") or ""}
 
-    # HTTP transport
     elif network == "http":
         stream["httpSettings"] = {
             "path": path,
             "host": [host],
         }
 
-    # VLESS
     if config["protocol"] == "vless":
         user = {"id": config.get("uuid", ""), "encryption": "none"}
         if config.get("flow"):
@@ -277,18 +294,26 @@ def make_xray_config(config, local_port):
             "settings": {"vnext": [{"address": server, "port": port, "users": [user]}]},
             "streamSettings": stream,
         }
-    # TROJAN
     elif config["protocol"] == "trojan":
         outbound = {
             "protocol": "trojan",
             "settings": {"servers": [{"address": server, "port": port, "password": config.get("password", "")}]},
             "streamSettings": stream,
         }
-    # VMESS
     elif config["protocol"] == "vmess":
         outbound = {
             "protocol": "vmess",
-            "settings": {"vnext": [{"address": server, "port": port, "users": [{"id": config.get("id", ""), "alterId": config.get("aid", 0), "security": config.get("scy", "auto")}]}]},
+            "settings": {
+                "vnext": [{
+                    "address": server,
+                    "port": port,
+                    "users": [{
+                        "id": config.get("id", ""),
+                        "alterId": config.get("aid", 0),
+                        "security": config.get("scy", "auto"),
+                    }],
+                }]
+            },
             "streamSettings": stream,
         }
     else:
@@ -296,9 +321,9 @@ def make_xray_config(config, local_port):
 
     return {
         "log": {
-            "loglevel": "info", 
+            "loglevel": "warning",
             "error": "/dev/stderr",
-            "access": "/dev/stdout"
+            "access": "/dev/stdout",
         },
         "inbounds": [{
             "listen": "127.0.0.1",
@@ -339,7 +364,6 @@ def test_config(index, config):
                 start_new_session=True,
             )
 
-        # Wait for Xray local inbound
         started = False
         deadline = time.monotonic() + STARTUP_TIMEOUT
 
@@ -358,10 +382,17 @@ def test_config(index, config):
             if log_file and os.path.exists(log_file):
                 try:
                     with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-                        xray_error = f.read()[-1000:] 
+                        xray_error = f.read()[-1000:]
                 except Exception:
                     pass
-            return {"ok": False, "reason": f"xray_start_failed: {xray_error[-200:]}", "server": config.get("server", "unknown")}
+            return {
+                "ok": False,
+                "reason": f"xray_start_failed: {xray_error[-200:]}",
+                "server": config.get("server", "unknown"),
+            }
+
+        # ✅ فرصة إضافية لـ Xray باش يكمل الـ Handshake
+        time.sleep(0.5)
 
         proxies = {
             "http": f"http://127.0.0.1:{local_port}",
@@ -372,21 +403,38 @@ def test_config(index, config):
 
         if latency is not None:
             if latency <= MAX_LATENCY_MS:
-                return {"ok": True, "latency": latency, "line": config["original"], "server": config.get("server", "unknown")}
-            return {"ok": False, "reason": "latency_too_high", "server": config.get("server", "unknown")}
+                return {
+                    "ok": True,
+                    "latency": latency,
+                    "line": config["original"],
+                    "server": config.get("server", "unknown"),
+                }
+            return {
+                "ok": False,
+                "reason": "latency_too_high",
+                "server": config.get("server", "unknown"),
+            }
 
         xray_error = ""
         if log_file and os.path.exists(log_file):
             try:
                 with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-                    xray_error = f.read()[-500:] # قصيناها شوية باش ماتخنقش الشاشة
+                    xray_error = f.read()[-500:]
             except Exception:
                 pass
 
-        return {"ok": False, "reason": f"{error} | XRAY_LOG: {xray_error}", "server": config.get("server", "unknown")}
+        return {
+            "ok": False,
+            "reason": f"{error} | XRAY_LOG: {xray_error}",
+            "server": config.get("server", "unknown"),
+        }
 
     except Exception as e:
-        return {"ok": False, "reason": type(e).__name__, "server": config.get("server", "unknown")}
+        return {
+            "ok": False,
+            "reason": type(e).__name__,
+            "server": config.get("server", "unknown"),
+        }
     finally:
         if process:
             try:
@@ -397,6 +445,7 @@ def test_config(index, config):
                     process.kill()
                 except Exception:
                     pass
+
         for path in (config_file, log_file):
             if path and os.path.exists(path):
                 try:
@@ -428,6 +477,7 @@ def main():
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         pending = set()
+
         for _ in range(MAX_WORKERS):
             try:
                 pending.add(executor.submit(test_config, *next(tasks)))
@@ -435,7 +485,11 @@ def main():
                 break
 
         while pending:
-            done, pending = concurrent.futures.wait(pending, return_when=concurrent.futures.FIRST_COMPLETED)
+            done, pending = concurrent.futures.wait(
+                pending,
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+
             for future in done:
                 completed += 1
                 try:
@@ -452,7 +506,13 @@ def main():
                     print(f"[WORKER ERROR] {type(e).__name__}", flush=True)
 
                 if completed % 10 == 0 or completed == total:
-                    print(f"--- [Progress] {completed}/{total} | Working: {working_count} | Failed: {failed_count} | Remaining: {total - completed} ---", flush=True)
+                    print(
+                        f"--- [Progress] {completed}/{total} | "
+                        f"Working: {working_count} | "
+                        f"Failed: {failed_count} | "
+                        f"Remaining: {total - completed} ---",
+                        flush=True,
+                    )
 
                 try:
                     pending.add(executor.submit(test_config, *next(tasks)))
@@ -460,6 +520,7 @@ def main():
                     pass
 
     results.sort(key=lambda x: x["latency"])
+
     with open("working.txt", "w", encoding="utf-8") as f:
         for result in results:
             f.write(result["line"] + "\n")
