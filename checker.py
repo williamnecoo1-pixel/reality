@@ -32,16 +32,15 @@ TEST_URLS = [
     "https://cp.cloudflare.com/generate_204",
 ]
 
-TIMEOUT = 15           # زيادة الوقت الإجمالي للطلب
-MAX_WORKERS = 5        # تقليل عدد العمليات المتزامنة لتخفيف الضغط
+TIMEOUT = 15           
+MAX_WORKERS = 5        
 BASE_PORT = 10808
 MAX_LATENCY_MS = 8000
-RETRIES = 3            # زيادة عدد المحاولات
-STARTUP_TIMEOUT = 5    # زيادة وقت انتظار إقلاع Xray
-RETRY_DELAY = 1.0      # زيادة وقت الانتظار بين المحاولات
+RETRIES = 2            
+STARTUP_TIMEOUT = 5    
+RETRY_DELAY = 1.0      
 
 _tls = threading.local()
-
 
 # ============================================================
 # SESSION
@@ -51,10 +50,9 @@ def get_session():
     if not hasattr(_tls, "session"):
         session = requests.Session()
         session.trust_env = False
-        session.verify = False  # ✅ تعطيل التحقق من الشهادات لتجنب أخطاء SSL الوهمية
+        session.verify = False 
         _tls.session = session
     return _tls.session
-
 
 # ============================================================
 # HTTP TEST
@@ -67,7 +65,6 @@ def test_once(proxies):
     for url in TEST_URLS:
         try:
             start = time.perf_counter()
-
             response = session.get(
                 url,
                 proxies=proxies,
@@ -78,65 +75,38 @@ def test_once(proxies):
                     "Cache-Control": "no-cache",
                 },
             )
-
-            elapsed = round(
-                (time.perf_counter() - start) * 1000
-            )
+            elapsed = round((time.perf_counter() - start) * 1000)
 
             if response.status_code in (200, 204):
                 return elapsed, None
 
-            errors.append(
-                f"{url}: http_{response.status_code}"
-            )
+            errors.append(f"{url}: http_{response.status_code}")
 
         except requests.exceptions.SSLError as e:
-            errors.append(
-                f"{url}: tls_error: {str(e)[:150]}"
-            )
-
+            errors.append(f"{url}: tls_error: {str(e)[:150]}")
         except requests.exceptions.ProxyError as e:
-            errors.append(
-                f"{url}: proxy_error: {str(e)[:150]}"
-            )
-
+            errors.append(f"{url}: proxy_error: {str(e)[:150]}")
         except requests.exceptions.ConnectionError as e:
-            errors.append(
-                f"{url}: connection_error: {str(e)[:150]}"
-            )
-
+            errors.append(f"{url}: connection_error: {str(e)[:150]}")
         except requests.exceptions.Timeout as e:
-            errors.append(
-                f"{url}: timeout: {str(e)[:100]}"
-            )
-
+            errors.append(f"{url}: timeout: {str(e)[:100]}")
         except Exception as e:
-            errors.append(
-                f"{url}: {type(e).__name__}: {str(e)[:100]}"
-            )
+            errors.append(f"{url}: {type(e).__name__}: {str(e)[:100]}")
 
     return None, " || ".join(errors)
 
 
 def test_with_retries(proxies):
     last_error = "unknown"
-
     for attempt in range(RETRIES + 1):
         latency, error = test_once(proxies)
-
         if latency is not None and error is None:
             return latency, None
-
         last_error = error or "unknown"
-
         if last_error.startswith("proxy_error"):
             break
-
         if attempt < RETRIES:
-            time.sleep(
-                RETRY_DELAY + random.uniform(0, 0.2)
-            )
-
+            time.sleep(RETRY_DELAY + random.uniform(0, 0.2))
     return None, last_error
 
 
@@ -146,33 +116,20 @@ def test_with_retries(proxies):
 
 def download_configs():
     configs = []
-
     for source_url in SOURCE_URLS:
         try:
             print(f"Downloading: {source_url}", flush=True)
-
             response = requests.get(
                 source_url,
                 timeout=30,
-                headers={
-                    "User-Agent": "NeverStops-Checker/1.0"
-                },
+                headers={"User-Agent": "NeverStops-Checker/1.0"},
             )
-
             response.raise_for_status()
-
             configs.extend(
-                line.strip()
-                for line in response.text.splitlines()
-                if line.strip()
+                line.strip() for line in response.text.splitlines() if line.strip()
             )
-
         except Exception as e:
-            print(
-                f"[DOWNLOAD FAILED] {type(e).__name__}: {e}",
-                flush=True,
-            )
-
+            print(f"[DOWNLOAD FAILED] {type(e).__name__}: {e}", flush=True)
     return list(dict.fromkeys(configs))
 
 
@@ -185,11 +142,7 @@ def parse_config(line):
         if line.startswith("vmess://"):
             b64 = line[8:].split("#", 1)[0].strip()
             b64 += "=" * ((4 - len(b64) % 4) % 4)
-
-            config = json.loads(
-                base64.urlsafe_b64decode(b64).decode("utf-8")
-            )
-
+            config = json.loads(base64.urlsafe_b64decode(b64).decode("utf-8"))
             return {
                 "protocol": "vmess",
                 "server": config.get("add"),
@@ -208,10 +161,7 @@ def parse_config(line):
 
         if line.startswith(("vless://", "trojan://")):
             parsed = urlparse(line)
-            params = parse_qs(
-                parsed.query,
-                keep_blank_values=True,
-            )
+            params = parse_qs(parsed.query, keep_blank_values=True)
 
             def get(name):
                 return params.get(name, [""])[0]
@@ -238,10 +188,8 @@ def parse_config(line):
                 "flow": get("flow") or "",
                 "original": line,
             }
-
     except Exception:
         return None
-
     return None
 
 
@@ -256,134 +204,90 @@ def make_xray_config(config, local_port):
     if not server or not port:
         return None
 
-    security = (
-        config.get("security")
-        or config.get("tls")
-        or "none"
-    ).lower()
-
+    security = (config.get("security") or config.get("tls") or "none").lower()
     network = (config.get("net") or "tcp").lower()
+
+    # ✅ إصلاح مهم: إذا كان sni فارغ، نستعمل host، وإذا كان host فارغ نستعمل sni، وإلا نستعمل server
+    sni = config.get("sni") or config.get("host") or server
+    host = config.get("host") or config.get("sni") or server
 
     stream = {
         "network": network,
         "security": security,
     }
 
-    # ✅ TLS Fix
+    # TLS
     if security == "tls":
         tls_settings = {
-            "serverName": config.get("sni") or server,
-            "allowInsecure": True, # ضروري جداً لتجاوز أخطاء الشهادات
+            "serverName": sni,
+            "allowInsecure": True,
         }
-
         if config.get("alpn"):
-            tls_settings["alpn"] = [
-                x.strip()
-                for x in config["alpn"].split(",")
-                if x.strip()
-            ]
-
+            tls_settings["alpn"] = [x.strip() for x in config["alpn"].split(",") if x.strip()]
         if config.get("fp"):
             tls_settings["fingerprint"] = config["fp"]
-
         stream["tlsSettings"] = tls_settings
 
     # REALITY
     elif security == "reality":
         stream["realitySettings"] = {
-            "serverName": config.get("sni") or server,
+            "serverName": sni,
             "fingerprint": config.get("fp") or "chrome",
             "publicKey": config.get("pbk") or "",
             "shortId": config.get("sid") or "",
             "spiderX": config.get("spx") or "/",
         }
 
-    # ✅ WebSocket Fix
+    # WebSocket
     if network == "ws":
         ws = {
             "path": config.get("path") or "/",
         }
-        host = config.get("host") or config.get("sni")
         if host:
             ws["headers"] = {"Host": host}
         stream["wsSettings"] = ws
 
     # gRPC
     elif network == "grpc":
-        stream["grpcSettings"] = {
-            "serviceName": config.get("path") or "",
-        }
+        stream["grpcSettings"] = {"serviceName": config.get("path") or ""}
 
     # HTTP transport
     elif network == "http":
         stream["httpSettings"] = {
             "path": config.get("path") or "/",
-            "host": [
-                config.get("host")
-                or config.get("sni")
-                or server
-            ],
+            "host": [host],
         }
 
     # VLESS
     if config["protocol"] == "vless":
-        user = {
-            "id": config.get("uuid", ""),
-            "encryption": "none",
-        }
+        user = {"id": config.get("uuid", ""), "encryption": "none"}
         if config.get("flow"):
             user["flow"] = config["flow"]
-
         outbound = {
             "protocol": "vless",
-            "settings": {
-                "vnext": [{
-                    "address": server,
-                    "port": port,
-                    "users": [user],
-                }]
-            },
+            "settings": {"vnext": [{"address": server, "port": port, "users": [user]}]},
             "streamSettings": stream,
         }
-
     # TROJAN
     elif config["protocol"] == "trojan":
         outbound = {
             "protocol": "trojan",
-            "settings": {
-                "servers": [{
-                    "address": server,
-                    "port": port,
-                    "password": config.get("password", ""),
-                }]
-            },
+            "settings": {"servers": [{"address": server, "port": port, "password": config.get("password", "")}]},
             "streamSettings": stream,
         }
-
     # VMESS
     elif config["protocol"] == "vmess":
         outbound = {
             "protocol": "vmess",
-            "settings": {
-                "vnext": [{
-                    "address": server,
-                    "port": port,
-                    "users": [{
-                        "id": config.get("id", ""),
-                        "alterId": config.get("aid", 0),
-                        "security": config.get("scy", "auto"),
-                    }],
-                }]
-            },
+            "settings": {"vnext": [{"address": server, "port": port, "users": [{"id": config.get("id", ""), "alterId": config.get("aid", 0), "security": config.get("scy", "auto")}]}]},
             "streamSettings": stream,
         }
-
     else:
         return None
 
     return {
         "log": {
-            "loglevel": "warning", # تقليل مستوى السجلات لتجنب البطء
+            "loglevel": "info", # ✅ بدلناها من warning لـ info باش نشوفو أخطاء الاتصال بالسيرفر البعيد
             "error": "/dev/stderr",
             "access": "/dev/stdout"
         },
@@ -403,34 +307,20 @@ def make_xray_config(config, local_port):
 
 def test_config(index, config):
     local_port = BASE_PORT + (index % 40000)
-
     config_file = None
     log_file = None
     process = None
 
     try:
         xray_config = make_xray_config(config, local_port)
-
         if not xray_config:
-            return {
-                "ok": False,
-                "reason": "make_failed",
-                "server": config.get("server", "unknown"),
-            }
+            return {"ok": False, "reason": "make_failed", "server": config.get("server", "unknown")}
 
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".json",
-            delete=False,
-            encoding="utf-8",
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as f:
             json.dump(xray_config, f)
             config_file = f.name
 
-        log_file = tempfile.NamedTemporaryFile(
-            suffix=".log",
-            delete=False,
-        ).name
+        log_file = tempfile.NamedTemporaryFile(suffix=".log", delete=False).name
 
         with open(log_file, "w") as log_handle:
             process = subprocess.Popen(
@@ -448,10 +338,7 @@ def test_config(index, config):
             if process.poll() is not None:
                 break
             try:
-                with socket.create_connection(
-                    ("127.0.0.1", local_port),
-                    timeout=0.25,
-                ):
+                with socket.create_connection(("127.0.0.1", local_port), timeout=0.25):
                     started = True
                     break
             except OSError:
@@ -462,18 +349,10 @@ def test_config(index, config):
             if log_file and os.path.exists(log_file):
                 try:
                     with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-                        xray_error = f.read()[-500:]
+                        xray_error = f.read()[-1000:] # ✅ زدنا اللوغات
                 except Exception:
                     pass
-
-            return {
-                "ok": False,
-                "reason": f"xray_start_failed: {xray_error[-200:]}",
-                "server": config.get("server", "unknown"),
-            }
-
-        # ✅ إعطاء وقت إضافي لـ Xray لإكمال Handshake مع السيرفر
-        time.sleep(0.8)
+            return {"ok": False, "reason": f"xray_start_failed: {xray_error[-200:]}", "server": config.get("server", "unknown")}
 
         proxies = {
             "http": f"http://127.0.0.1:{local_port}",
@@ -484,40 +363,22 @@ def test_config(index, config):
 
         if latency is not None:
             if latency <= MAX_LATENCY_MS:
-                return {
-                    "ok": True,
-                    "latency": latency,
-                    "line": config["original"],
-                    "server": config.get("server", "unknown"),
-                }
-            return {
-                "ok": False,
-                "reason": "latency_too_high",
-                "server": config.get("server", "unknown"),
-            }
+                return {"ok": True, "latency": latency, "line": config["original"], "server": config.get("server", "unknown")}
+            return {"ok": False, "reason": "latency_too_high", "server": config.get("server", "unknown")}
 
-        # إذا فشل الاتصال، نقرأ السجل لمعرفة سبب الفشل
+        # ✅ إقرأ اللوغات باش تعرف علاش فشل
         xray_error = ""
         if log_file and os.path.exists(log_file):
             try:
                 with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-                    xray_error = f.read()[-300:]
+                    xray_error = f.read()[-1000:]
             except Exception:
                 pass
 
-        return {
-            "ok": False,
-            "reason": f"{error} | XRAY_LOG: {xray_error}",
-            "server": config.get("server", "unknown"),
-        }
+        return {"ok": False, "reason": f"{error} | XRAY_LOG: {xray_error}", "server": config.get("server", "unknown")}
 
     except Exception as e:
-        return {
-            "ok": False,
-            "reason": type(e).__name__,
-            "server": config.get("server", "unknown"),
-        }
-
+        return {"ok": False, "reason": type(e).__name__, "server": config.get("server", "unknown")}
     finally:
         if process:
             try:
@@ -528,7 +389,6 @@ def test_config(index, config):
                     process.kill()
                 except Exception:
                     pass
-
         for path in (config_file, log_file):
             if path and os.path.exists(path):
                 try:
@@ -544,13 +404,7 @@ def test_config(index, config):
 def main():
     print("Downloading configs...", flush=True)
     lines = download_configs()
-
-    configs = [
-        config
-        for config in (parse_config(line) for line in lines)
-        if config
-    ]
-
+    configs = [config for config in (parse_config(line) for line in lines) if config]
     total = len(configs)
     print(f"\nTotal configs to test: {total}\n", flush=True)
 
@@ -562,14 +416,10 @@ def main():
     completed = 0
     working_count = 0
     failed_count = 0
-
     tasks = iter(enumerate(configs, start=1))
 
-    with concurrent.futures.ThreadPoolExecutor(
-        max_workers=MAX_WORKERS
-    ) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         pending = set()
-
         for _ in range(MAX_WORKERS):
             try:
                 pending.add(executor.submit(test_config, *next(tasks)))
@@ -577,16 +427,11 @@ def main():
                 break
 
         while pending:
-            done, pending = concurrent.futures.wait(
-                pending,
-                return_when=concurrent.futures.FIRST_COMPLETED,
-            )
-
+            done, pending = concurrent.futures.wait(pending, return_when=concurrent.futures.FIRST_COMPLETED)
             for future in done:
                 completed += 1
                 try:
                     result = future.result()
-
                     if result.get("ok"):
                         working_count += 1
                         results.append(result)
@@ -594,19 +439,12 @@ def main():
                     else:
                         failed_count += 1
                         print(f"[FAILED] {result.get('server')} | {result.get('reason')}", flush=True)
-
                 except Exception as e:
                     failed_count += 1
                     print(f"[WORKER ERROR] {type(e).__name__}", flush=True)
 
                 if completed % 10 == 0 or completed == total:
-                    print(
-                        f"--- [Progress] {completed}/{total} | "
-                        f"Working: {working_count} | "
-                        f"Failed: {failed_count} | "
-                        f"Remaining: {total - completed} ---",
-                        flush=True,
-                    )
+                    print(f"--- [Progress] {completed}/{total} | Working: {working_count} | Failed: {failed_count} | Remaining: {total - completed} ---", flush=True)
 
                 try:
                     pending.add(executor.submit(test_config, *next(tasks)))
@@ -614,7 +452,6 @@ def main():
                     pass
 
     results.sort(key=lambda x: x["latency"])
-
     with open("working.txt", "w", encoding="utf-8") as f:
         for result in results:
             f.write(result["line"] + "\n")
