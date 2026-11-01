@@ -13,10 +13,11 @@ from urllib.parse import parse_qs, unquote, urlparse
 import requests
 import urllib3
 
+# إخفاء التحذيرات الخاصة بعدم التحقق من الشهادات
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ============================================================
-# CONFIGURATION
+# CONFIGURATION (تم تسريع الإعدادات لتجنب Timeout)
 # ============================================================
 
 SOURCE_URLS = [
@@ -31,13 +32,13 @@ TEST_URLS = [
     "https://cp.cloudflare.com/generate_204",
 ]
 
-TIMEOUT = 15
-MAX_WORKERS = 3
+TIMEOUT = 10           # ✅ نقصناها من 15 لـ 10
+MAX_WORKERS = 10       # ✅ زدناها باش نسرعو العملية
 BASE_PORT = 10808
 MAX_LATENCY_MS = 8000
-RETRIES = 2
-STARTUP_TIMEOUT = 5
-RETRY_DELAY = 1.0
+RETRIES = 1            # ✅ نقصناها باش ما نضيعوش الوقت فالمحاولات الفاشلة
+STARTUP_TIMEOUT = 3    # ✅ نقصناها حيت Xray كيقلع بسرعة
+RETRY_DELAY = 0.5      # ✅ نقصناها
 
 DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -56,7 +57,7 @@ def get_session():
     if not hasattr(_tls, "session"):
         session = requests.Session()
         session.trust_env = False
-        session.verify = False
+        session.verify = False  # ✅ تعطيل التحقق من الشهادات
         _tls.session = session
     return _tls.session
 
@@ -236,7 +237,7 @@ def make_xray_config(config, local_port):
     if security == "tls":
         tls_settings = {
             "serverName": sni,
-            "allowInsecure": True,
+            "allowInsecure": True, # ✅ ضروري لتجاوز أخطاء الشهادات
             "fingerprint": config.get("fp") or "chrome",
         }
 
@@ -264,7 +265,7 @@ def make_xray_config(config, local_port):
             "spiderX": config.get("spx") or "/",
         }
 
-    # ✅ WebSocket: Host غير إلا كان موجود
+    # ✅ WebSocket: إضافة Host و User-Agent
     if network == "ws":
         ws = {
             "path": path,
@@ -321,7 +322,7 @@ def make_xray_config(config, local_port):
 
     return {
         "log": {
-            "loglevel": "warning",
+            "loglevel": "warning", # تقليل اللوغات باش ما تخنقش النظام
             "error": "/dev/stderr",
             "access": "/dev/stdout",
         },
@@ -391,7 +392,7 @@ def test_config(index, config):
                 "server": config.get("server", "unknown"),
             }
 
-        # ✅ فرصة إضافية لـ Xray باش يكمل الـ Handshake
+        # ✅ فرصة إضافية لـ Xray باش يكمل الـ Handshake مع السيرفر البعيد
         time.sleep(0.5)
 
         proxies = {
