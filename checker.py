@@ -145,17 +145,17 @@ def parse_config(line):
             config = json.loads(base64.urlsafe_b64decode(b64).decode("utf-8"))
             return {
                 "protocol": "vmess",
-                "server": config.get("add"),
+                "server": config.get("add", "").strip(),
                 "port": int(config.get("port", 443)),
                 "id": config.get("id"),
                 "aid": int(config.get("aid", 0)),
                 "scy": config.get("scy", "auto"),
                 "net": (config.get("net") or "tcp").lower(),
                 "security": (config.get("tls") or "none").lower(),
-                "sni": config.get("sni", ""),
-                "host": config.get("host", ""),
-                "path": config.get("path", "/"),
-                "alpn": config.get("alpn", ""),
+                "sni": str(config.get("sni", "")).strip(),
+                "host": str(config.get("host", "")).strip(),
+                "path": str(config.get("path", "/")).strip(),
+                "alpn": str(config.get("alpn", "")).strip(),
                 "original": line,
             }
 
@@ -164,14 +164,14 @@ def parse_config(line):
             params = parse_qs(parsed.query, keep_blank_values=True)
 
             def get(name):
-                return params.get(name, [""])[0]
+                return params.get(name, [""])[0].strip()
 
             protocol = parsed.scheme.lower()
             username = unquote(parsed.username or "")
 
             return {
                 "protocol": protocol,
-                "server": parsed.hostname,
+                "server": parsed.hostname.strip(),
                 "port": parsed.port or 443,
                 "uuid": username,
                 "password": unquote(parsed.password or username),
@@ -207,9 +207,13 @@ def make_xray_config(config, local_port):
     security = (config.get("security") or config.get("tls") or "none").lower()
     network = (config.get("net") or "tcp").lower()
 
-    # ✅ إصلاح مهم: إذا كان sni فارغ، نستعمل host، وإذا كان host فارغ نستعمل sni، وإلا نستعمل server
-    sni = config.get("sni") or config.get("host") or server
-    host = config.get("host") or config.get("sni") or server
+    # تنظيف SNI و Host
+    sni = str(config.get("sni") or config.get("host") or server).strip()
+    host = str(config.get("host") or config.get("sni") or server).strip()
+    
+    path = config.get("path") or "/"
+    if not path.startswith("/"):
+        path = "/" + path
 
     stream = {
         "network": network,
@@ -221,11 +225,16 @@ def make_xray_config(config, local_port):
         tls_settings = {
             "serverName": sni,
             "allowInsecure": True,
+            # ✅ إجبار استعمال بصمة كروم باش نتفاداو الحظر ديال Cloudflare WAF
+            "fingerprint": config.get("fp") or "chrome", 
         }
+        
+        # ✅ إجبار استعمال ALPN
         if config.get("alpn"):
             tls_settings["alpn"] = [x.strip() for x in config["alpn"].split(",") if x.strip()]
-        if config.get("fp"):
-            tls_settings["fingerprint"] = config["fp"]
+        else:
+            tls_settings["alpn"] = ["h2", "http/1.1"]
+            
         stream["tlsSettings"] = tls_settings
 
     # REALITY
@@ -241,7 +250,7 @@ def make_xray_config(config, local_port):
     # WebSocket
     if network == "ws":
         ws = {
-            "path": config.get("path") or "/",
+            "path": path,
         }
         if host:
             ws["headers"] = {"Host": host}
@@ -254,7 +263,7 @@ def make_xray_config(config, local_port):
     # HTTP transport
     elif network == "http":
         stream["httpSettings"] = {
-            "path": config.get("path") or "/",
+            "path": path,
             "host": [host],
         }
 
@@ -287,7 +296,7 @@ def make_xray_config(config, local_port):
 
     return {
         "log": {
-            "loglevel": "info", # ✅ بدلناها من warning لـ info باش نشوفو أخطاء الاتصال بالسيرفر البعيد
+            "loglevel": "info", 
             "error": "/dev/stderr",
             "access": "/dev/stdout"
         },
@@ -349,7 +358,7 @@ def test_config(index, config):
             if log_file and os.path.exists(log_file):
                 try:
                     with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-                        xray_error = f.read()[-1000:] # ✅ زدنا اللوغات
+                        xray_error = f.read()[-1000:] 
                 except Exception:
                     pass
             return {"ok": False, "reason": f"xray_start_failed: {xray_error[-200:]}", "server": config.get("server", "unknown")}
@@ -366,12 +375,11 @@ def test_config(index, config):
                 return {"ok": True, "latency": latency, "line": config["original"], "server": config.get("server", "unknown")}
             return {"ok": False, "reason": "latency_too_high", "server": config.get("server", "unknown")}
 
-        # ✅ إقرأ اللوغات باش تعرف علاش فشل
         xray_error = ""
         if log_file and os.path.exists(log_file):
             try:
                 with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-                    xray_error = f.read()[-1000:]
+                    xray_error = f.read()[-500:] # قصيناها شوية باش ماتخنقش الشاشة
             except Exception:
                 pass
 
