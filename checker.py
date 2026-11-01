@@ -81,8 +81,10 @@ def test_once(proxies):
             if response.status_code in (200, 204):
                 return elapsed, None
 
-            # HTTP response received, but not confirmed working
             last_error = f"http_{response.status_code}"
+
+        except requests.exceptions.SSLError as e:
+            last_error = f"tls_error: {str(e)[:180]}"
 
         except requests.exceptions.ConnectTimeout:
             last_error = "connect_timeout"
@@ -90,20 +92,17 @@ def test_once(proxies):
         except requests.exceptions.ReadTimeout:
             last_error = "read_timeout"
 
-        except requests.exceptions.SSLError:
-            last_error = "tls_error"
+        except requests.exceptions.ProxyError as e:
+            last_error = f"proxy_error: {str(e)[:180]}"
 
-        except requests.exceptions.ProxyError:
-            return None, "proxy_error"
-
-        except requests.exceptions.ConnectionError:
-            last_error = "connection_error"
+        except requests.exceptions.ConnectionError as e:
+            last_error = f"connection_error: {str(e)[:180]}"
 
         except requests.exceptions.Timeout:
             last_error = "timeout"
 
         except Exception as e:
-            last_error = type(e).__name__
+            last_error = f"{type(e).__name__}: {str(e)[:180]}"
 
     return None, last_error
 
@@ -120,7 +119,7 @@ def test_with_retries(proxies):
 
         last_error = error or "unknown"
 
-        if last_error == "proxy_error":
+        if last_error.startswith("proxy_error"):
             break
 
         if attempt < RETRIES:
@@ -479,11 +478,25 @@ def test_config(index, config):
 
         if not started:
 
+            xray_error = ""
+
+            if log_file and os.path.exists(log_file):
+                try:
+                    with open(
+                        log_file,
+                        "r",
+                        encoding="utf-8",
+                        errors="replace",
+                    ) as f:
+                        xray_error = f.read()[-500:]
+                except Exception:
+                    pass
+
             return {
                 "ok": False,
-                "reason": "xray_start_failed",
+                "reason": f"xray_start_failed: {xray_error[-250:]}",
                 "server": config.get("server", "unknown"),
-            }
+                }
 
         proxies = {
             "http": f"http://127.0.0.1:{local_port}",
