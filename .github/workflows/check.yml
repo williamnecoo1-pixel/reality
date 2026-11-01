@@ -71,6 +71,7 @@ jobs:
             echo "No changes in working_configs.txt"
           else
             git commit -m "Update working configs"
+            git pull --rebase # ✅ زدنا هاد السطر باش تتفادى التعارض
             git push
           fi
 
