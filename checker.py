@@ -11,7 +11,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 import requests
 
 SOURCE_URLS = [
-    "https://github.com/williamnecoo1-pixel/ss/raw/refs/heads/main/sub.txt",
+   "https://github.com/Mohamedhnini-a/Neverstops/raw/refs/heads/main/sub.txt",
+    "https://github.com/Mohamedhnini-a/Neverstops-2/raw/refs/heads/main/sub.txt",
 ]
 XRAY = "./xray/xray"
 
