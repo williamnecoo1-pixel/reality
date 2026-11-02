@@ -12,7 +12,7 @@ import requests
 
 SOURCE_URLS = [
     
-    "https://github.com/williamnecoo1-pixel/ss/raw/refs/heads/main/sub.txt",
+    "https://github.com/barry-far/V2ray-Config/raw/refs/heads/main/Splitted-By-Protocol/trojan.txt",
     
 ]
 XRAY = "./xray/xray"
