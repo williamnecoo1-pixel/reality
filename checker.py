@@ -21,8 +21,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # ============================================================
 
 SOURCE_URLS = [
-    "https://github.com/Mohamedhnini-a/Neverstops/raw/refs/heads/main/sub.txt",
-    "https://github.com/Mohamedhnini-a/Neverstops-2/raw/refs/heads/main/sub.txt",
+"https://github.com/williamnecoo1-pixel/ss/raw/refs/heads/main/sub.txt",
 ]
 
 XRAY = "./xray/xray"
