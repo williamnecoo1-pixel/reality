@@ -22,8 +22,8 @@ TEST_URLS = [
     "http://www.gstatic.com/generate_204",
 ]
 
-TIMEOUT = 5
-MAX_WORKERS = 15 # نقصناها لـ 15 باش ما يتخنقش السيرفر
+TIMEOUT = 15
+MAX_WORKERS = 20 # نقصناها لـ 15 باش ما يتخنقش السيرفر
 BASE_PORT = 20000
 MAX_LATENCY_MS = 5000
 
