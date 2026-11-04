@@ -31,8 +31,8 @@ jobs:
 
       - name: Download Xray
         run: |
-          # ✅ تحديث لنسخة حديثة جداً تدعم uTLS، ALPN و WebSocket heartbeat
-          XRAY_VERSION="v25.11.16"
+          # ✅ تحديث لآخر إصدار مستقر وأمني (v26.10.31) اللي كيعالج ثغرات خطيرة
+          XRAY_VERSION="v26.10.31"
           wget -q "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip" -O xray.zip
           unzip -q xray.zip -d xray
           chmod +x xray/xray
@@ -40,7 +40,6 @@ jobs:
 
       - name: Check configs
         run: |
-          # ✅ زدنا -u باش تشوف اللوغات دغيا
           python -u checker.py
 
       - name: Prepare working_configs.txt
