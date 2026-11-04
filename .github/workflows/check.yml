@@ -17,10 +17,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7  # ✅ تم التحديث إلى v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7  # ✅ تم التحديث إلى v7
         with:
           python-version: "3.12"
 
@@ -31,7 +31,7 @@ jobs:
 
       - name: Download Xray
         run: |
-          # ✅ تحديث لآخر إصدار مستقر وأمني (v26.10.31) اللي كيعالج ثغرات خطيرة
+          # ✅ تحديث لآخر إصدار مستقر وأمني (v26.10.31)
           XRAY_VERSION="v26.10.31"
           wget -q "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip" -O xray.zip
           unzip -q xray.zip -d xray
@@ -76,7 +76,7 @@ jobs:
           fi
 
       - name: Upload working configs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7  # ✅ تم التحديث إلى v7
         with:
           name: working-configs
           path: working_configs.txt
