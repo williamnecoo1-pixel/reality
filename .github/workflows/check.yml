@@ -31,8 +31,8 @@ jobs:
 
       - name: Download Xray
         run: |
-          # ✅ تم تحديث الإصدار لنسخة حديثة تدعم uTLS و ALPN
-          XRAY_VERSION="v25.6.8"
+          # ✅ تحديث لنسخة حديثة جداً تدعم uTLS، ALPN و WebSocket heartbeat
+          XRAY_VERSION="v25.11.16"
           wget -q "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip" -O xray.zip
           unzip -q xray.zip -d xray
           chmod +x xray/xray
@@ -71,7 +71,8 @@ jobs:
             echo "No changes in working_configs.txt"
           else
             git commit -m "Update working configs"
-            git pull --rebase # ✅ زدنا هاد السطر باش تتفادى التعارض
+            # ✅ تحسين عملية السحب لتجنب التعارضات
+            git pull origin main --rebase 
             git push
           fi
 
