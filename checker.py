@@ -12,9 +12,10 @@ from urllib.parse import parse_qs, unquote, urlparse
 import requests
 
 SOURCE_URLS = [
-    "https://github.com/williamnecoo1-pixel/reality/raw/refs/heads/main/working_configs.txt",
     "https://github.com/williamnecoo1-pixel/Neverstops/raw/refs/heads/main/sub.txt",
-    "https://cp.cloudflare.com/generate_204",
+    "https://github.com/williamnecoo1-pixel/reality/raw/refs/heads/main/working_configs.txt",
+    
+    
 ]
 XRAY = "./xray/xray"
 
